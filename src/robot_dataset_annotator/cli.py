@@ -4,6 +4,7 @@ import argparse
 import json
 from importlib import resources
 from pathlib import Path
+import shlex
 
 import numpy as np
 
@@ -12,6 +13,7 @@ from .core.config import SessionConfig
 from .core.decisions import validate_decision_files, write_decision_template
 from .core.io import write_json_atomic
 from .core.plugins import load_suggester
+from .core.runner import execute, prepare_next
 from .core.task_spec import TaskSpec
 
 
@@ -39,6 +41,7 @@ def _configure(args: argparse.Namespace) -> int:
         "review_manifest": args.review_manifest,
         "decisions_file": args.decisions_file,
         "checks": [],
+        "commands": {},
     }
     output = args.output.expanduser().resolve()
     if output.exists() and not args.force:
@@ -107,6 +110,28 @@ def _suggest(args: argparse.Namespace) -> int:
     return 0 if result.get("status") == "candidate" else 2
 
 
+def _resume(args: argparse.Namespace) -> int:
+    config = SessionConfig.load(args.config.expanduser().resolve())
+    try:
+        action = prepare_next(config, item_name=args.item)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    if action is None:
+        print(json.dumps({"status": "COMPLETE"}, ensure_ascii=False))
+        return 0
+    payload = {
+        "item": action.row.item,
+        "stage": action.row.stage.value,
+        "action": action.row.next_action,
+        "argv": list(action.argv),
+        "command": shlex.join(action.argv),
+    }
+    print(json.dumps(payload, ensure_ascii=False, indent=2), flush=True)
+    if not args.execute:
+        return 0
+    return execute(action)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Task-pluggable robot dataset annotation and batch audit"
@@ -161,6 +186,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     suggest.add_argument("--output", type=Path)
     suggest.set_defaults(handler=_suggest)
+
+    resume = commands.add_parser("resume", help="prepare or run the next transition")
+    resume.add_argument("--config", type=Path, required=True)
+    resume.add_argument("--item")
+    resume.add_argument(
+        "--execute",
+        action="store_true",
+        help="run the configured argv; omitted means a read-only preview",
+    )
+    resume.set_defaults(handler=_resume)
     return parser
 
 

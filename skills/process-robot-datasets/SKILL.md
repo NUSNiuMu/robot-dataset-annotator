@@ -48,6 +48,14 @@ perform only the next missing transition:
 
 Use atomic temporary outputs followed by rename. Never overwrite a complete dataset.
 
+Preview the configured next transition:
+
+    rda resume --config <session.json>
+
+Inspect the rendered argv and paths. Add `--execute` only after they match the confirmed scope.
+Commands are argv arrays stored in the session and do not use a host shell. Leave human-review
+actions unconfigured so the runner stops and reports the required manual work.
+
 ## Review exhaustively
 
 Read [references/review-standard.md](references/review-standard.md) before writing decisions.

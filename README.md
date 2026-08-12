@@ -16,6 +16,7 @@ python3 -m venv .venv
 .venv/bin/rda copy-task cup-pick-place --output .rda/cup-pick-place.json
 .venv/bin/rda configure --output .rda/session.json
 .venv/bin/rda audit --config .rda/session.json
+.venv/bin/rda resume --config .rda/session.json
 ```
 
 `configure` 不提供机器相关的默认路径；缺少参数时会询问工作区、输入、审核、数据集和任务
@@ -30,6 +31,9 @@ cp -a skills/process-robot-datasets "$skill_root/"
 ```
 
 Skill 不保存项目路径；每次新环境首次执行时会要求确认路径并生成 session。
+在 session 的 `commands` 中以 argv 数组配置数据源、导出器和验证器。`resume` 默认只预览，
+明确增加 `--execute` 才执行下一条转换；支持 `{input}`、`{review_dir}`、`{decisions}`、
+`{dataset_dir}`、`{task_spec}` 等路径占位符，不经过宿主 shell。
 
 规范化的低维状态可通过任务插件生成候选边界：
 

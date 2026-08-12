@@ -28,6 +28,7 @@ class SessionConfig:
     review_manifest: str = "manifest.json"
     decisions_file: str = "decisions.json"
     checks: tuple[CheckSpec, ...] = ()
+    commands: dict[str, tuple[str, ...]] | None = None
 
     @classmethod
     def load(cls, path: Path) -> "SessionConfig":
@@ -51,6 +52,11 @@ class SessionConfig:
             )
             for item in payload.get("checks", [])
         )
+        commands: dict[str, tuple[str, ...]] = {}
+        for action, command in payload.get("commands", {}).items():
+            if not isinstance(command, list) or not command:
+                raise ValueError(f"command {action!r} must be a non-empty argv array")
+            commands[str(action)] = tuple(str(value) for value in command)
         start_item = payload.get("start_item")
         return cls(
             workspace=resolve(payload.get("workspace"), "workspace"),
@@ -64,4 +70,5 @@ class SessionConfig:
             review_manifest=str(payload.get("review_manifest", "manifest.json")),
             decisions_file=str(payload.get("decisions_file", "decisions.json")),
             checks=checks,
+            commands=commands,
         )

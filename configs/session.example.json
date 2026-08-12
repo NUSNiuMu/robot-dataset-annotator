@@ -10,6 +10,30 @@
   "dataset_suffix": "",
   "review_manifest": "manifest.json",
   "decisions_file": "decisions.json",
+  "commands": {
+    "prepare_review": [
+      "REPLACE_WITH_ADAPTER_COMMAND",
+      "--input",
+      "{input}",
+      "--output",
+      "{review_dir}",
+      "--task-spec",
+      "{task_spec}"
+    ],
+    "export_dataset": [
+      "REPLACE_WITH_EXPORT_COMMAND",
+      "--input",
+      "{input}",
+      "--decisions",
+      "{decisions}",
+      "--output",
+      "{dataset_dir}"
+    ],
+    "run_validation": [
+      "REPLACE_WITH_VALIDATOR_COMMAND",
+      "{dataset_dir}"
+    ]
+  },
   "checks": [
     {
       "path": "meta/verification.json",
