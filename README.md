@@ -62,3 +62,4 @@ skills/          可随仓库复制或安装的标准 Codex Skill
 
 仓库自动化开发约束见 [AGENTS.md](AGENTS.md)；`CLAUDE.md` 与其同步并一同提交。代码行为、
 命令、schema 或 Skill 发生变化时，必须同步文档、运行测试、提交并推送当前分支。
+本地 `tests/` 用于开发验证，但不会提交到 GitHub，也不会进入 wheel 或 sdist。

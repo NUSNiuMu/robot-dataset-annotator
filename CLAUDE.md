@@ -12,6 +12,7 @@ git log origin/main..HEAD --oneline
 - 不假设工作区、录制、审核、数据集、task spec 或容器的固定路径。
 - 用户未提供路径时先发现候选，再要求用户确认；路径只写入用户 session。
 - `outputs/`、`reviews/`、`datasets/`、`.rda/` 和原始录制均为本地产物，不提交。
+- `tests/` 是本地验证资产：必须保留并运行，但禁止加入 Git、上传 GitHub 或打入安装包。
 
 ## 分层边界
 
@@ -53,4 +54,6 @@ rg -n '/home/|/workspaces/' skills src configs docs README.md
 - 每次代码修改完成并验证后，默认创建英文 conventional commit，并推送当前分支到
   `origin`。只有用户明确要求保留本地或暂不上传时才停止。
 - 推送前运行 `git diff --check`，只暂存本次范围内的文件；不得夹带生成数据或未知提交。
+- 推送前确认 `git ls-files tests` 为空，并检查 wheel/sdist 文件列表不包含 `tests/` 或
+  `test_*.py`。
 - 推送失败时保留本地提交，明确报告认证、网络或远端权限问题。
