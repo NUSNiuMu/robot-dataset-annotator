@@ -59,3 +59,6 @@ skills/          可随仓库复制或安装的标准 Codex Skill
 
 架构约束和新增任务流程见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 与
 [docs/ADDING_TASK.md](docs/ADDING_TASK.md)。
+
+仓库自动化开发约束见 [AGENTS.md](AGENTS.md)；`CLAUDE.md` 与其同步并一同提交。代码行为、
+命令、schema 或 Skill 发生变化时，必须同步文档、运行测试、提交并推送当前分支。
