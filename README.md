@@ -1,0 +1,57 @@
+# Robot Dataset Annotator
+
+一个与采集系统解耦的机器人数据分段、自动标注、人工审核和批次验收框架。核心库不假设
+rosbag、相机名称、任务类型、工作目录或导出格式；这些差异由任务插件、数据源适配器和会话
+配置提供。
+
+当前内置 `cup-pick-place` 任务，保留本次 30 个 Insight rosbag 生产中验证过的四阶段边界
+推断方法。新任务可以复用批次状态机、多人审核 schema、穷尽审核门和验收报告，不需要复制
+杯子任务代码。
+
+## 快速开始
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -e '.[dev]'
+.venv/bin/rda copy-task cup-pick-place --output .rda/cup-pick-place.json
+.venv/bin/rda configure --output .rda/session.json
+.venv/bin/rda audit --config .rda/session.json
+```
+
+`configure` 不提供机器相关的默认路径；缺少参数时会询问工作区、输入、审核、数据集和任务
+配置路径。可迁移的 Codex Skill 位于 `skills/process-robot-datasets/`。
+
+安装 Skill：
+
+```bash
+skill_root="${CODEX_HOME:-$HOME/.codex}/skills"
+mkdir -p "$skill_root"
+cp -a skills/process-robot-datasets "$skill_root/"
+```
+
+Skill 不保存项目路径；每次新环境首次执行时会要求确认路径并生成 session。
+
+规范化的低维状态可通过任务插件生成候选边界：
+
+```bash
+.venv/bin/rda suggest --task-spec .rda/cup-pick-place.json \
+  --observations segment.npz --format npz
+```
+
+NPZ 包含 `state` 和 `state_valid`；Insight review parquet 可改用
+`--format insight-parquet`。候选边界始终需要视觉确认。
+
+## 分层
+
+```text
+src/robot_dataset_annotator/
+  core/          决策校验、产物驱动状态机、原子文件写入
+  tasks/         任务插件；杯子只是其中一个任务
+  adapters/      rosbag、LeRobot 等外部格式边界
+  task_specs/    可版本化的任务语义和质量门配置
+  cli.py         稳定命令入口
+skills/          可随仓库复制或安装的标准 Codex Skill
+```
+
+架构约束和新增任务流程见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 与
+[docs/ADDING_TASK.md](docs/ADDING_TASK.md)。

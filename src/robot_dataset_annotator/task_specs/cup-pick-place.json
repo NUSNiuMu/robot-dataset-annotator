@@ -1,0 +1,28 @@
+{
+  "task_id": "cup-pick-place",
+  "description": "Pick up a disposable cup and place it into a drop zone.",
+  "plugin": "robot_dataset_annotator.tasks.cup:infer_fused_boundaries",
+  "minimum_segment_frames": 10,
+  "atomic_actions": [
+    {
+      "key": "approach_acquire",
+      "label": "approach_and_acquire_cup",
+      "instruction": "Approach and acquire the disposable cup with the grippers."
+    },
+    {
+      "key": "transport",
+      "label": "transport_cup_to_box",
+      "instruction": "Transport the acquired disposable cup to the box."
+    },
+    {
+      "key": "place_release",
+      "label": "place_and_release_cup_in_drop_zone",
+      "instruction": "Place and release the disposable cup in the box drop zone."
+    },
+    {
+      "key": "retreat",
+      "label": "retreat_from_drop_zone",
+      "instruction": "Retreat the grippers from the box drop zone."
+    }
+  ]
+}

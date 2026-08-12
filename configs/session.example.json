@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "workspace": "REPLACE_WITH_CONFIRMED_WORKSPACE",
+  "input_root": "REPLACE_WITH_CONFIRMED_RECORDING_ROOT",
+  "review_root": "REPLACE_WITH_CONFIRMED_REVIEW_ROOT",
+  "dataset_root": "REPLACE_WITH_CONFIRMED_DATASET_ROOT",
+  "task_spec": "REPLACE_WITH_CONFIRMED_TASK_SPEC",
+  "input_glob": "*",
+  "start_item": null,
+  "dataset_suffix": "",
+  "review_manifest": "manifest.json",
+  "decisions_file": "decisions.json",
+  "checks": [
+    {
+      "path": "meta/verification.json",
+      "field": "status",
+      "expected": "PASS",
+      "stage": "internal"
+    },
+    {
+      "path": "meta/official_validation.json",
+      "field": "status",
+      "expected": "PASS",
+      "stage": "official"
+    }
+  ]
+}

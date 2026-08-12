@@ -1,0 +1,4 @@
+interface:
+  display_name: "Process Robot Datasets"
+  short_description: "Audit, annotate, segment, export, and validate robot datasets"
+  default_prompt: "Use $process-robot-datasets to resume and validate this robot dataset annotation batch."
