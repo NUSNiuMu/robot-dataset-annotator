@@ -23,4 +23,17 @@ DISCOVERED
 插件可以返回单个候选，也可以返回同一源片段中的多个有序 episode 候选；core decisions
 始终使用源片段帧坐标验证覆盖、顺序和最短动作长度。
 
+`adapters/lerobot_export.py` 是可选依赖边界：它延迟导入 ROS、OpenCV 和 LeRobot，按审核
+时间轴对 MCAP 三路相机做最近邻同步，并只导出 decisions 接受的帧。低维观测来自已同步的
+review manifest，视频来自原始相机消息；动作语义、同步误差、输入哈希和 LeRobot 版本写入
+数据集内的 `rda/export_manifest.json`。导出器当前只接受单 source segment，避免把多个独立
+时间轴静默拼接。
+
+`adapters/lerobot_validation.py` 先直接检查 Parquet 的 row、episode、timestamp、source
+frame、原子动作、有效性和 next-frame action 不变量，再完整解码每一个视频文件。随后用
+官方 `LeRobotDataset` 做代表性索引并通过 PyTorch DataLoader 读取一个 batch；两个阶段分别
+写独立 PASS 证据，官方检查失败时不会伪造完成状态。
+Python 3.10 验证环境的直接版本锁定位于 `configs/lerobot-validator-py310.txt`，不得把这组
+通用机器学习 wheel 安装进厂商设备 Python 环境。
+
 路径只出现在用户生成的会话配置中。仓库源码、任务配置和 Skill 禁止写入设备绝对路径。

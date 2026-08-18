@@ -85,6 +85,29 @@ Validate before an expensive export:
     rda validate-decisions --manifest <manifest.json> \
       --decisions <decisions.json> --task-spec <task.json>
 
+For a reviewed single-segment Insight MCAP, export three source camera streams and synchronized
+poses to LeRobotDataset v3.0 with explicit paths:
+
+    rda export-lerobot --source <recording-dir> \
+      --review-manifest <review-dir>/manifest.json \
+      --annotation-manifest <review-dir>/annotation_manifest.json \
+      --decisions <review-dir>/decisions.json --task-spec <task.json> \
+      --output <dataset-dir> --repo-id <namespace/name>
+
+The adapter refuses an existing output and atomically promotes a temporary directory only after
+LeRobot finalization. Its action is the next-frame dual-hand pose in the source tracking frame;
+provenance must state that it is not robot-retargeted and has no gripper command.
+
+Validate the completed local dataset in the same pinned environment:
+
+    rda validate-lerobot --dataset <dataset-dir>
+
+For Python 3.10, build that isolated environment from
+`configs/lerobot-validator-py310.txt`; do not install it into the device Python environment.
+This command must completely decode every video file before it writes internal PASS evidence, then
+construct the official LeRobot loader, index representative rows, and read one DataLoader batch
+before it writes official PASS evidence.
+
 ## Resume and validate
 
 Read [references/recovery-and-validation.md](references/recovery-and-validation.md) after a

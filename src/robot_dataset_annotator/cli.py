@@ -114,6 +114,32 @@ def _suggest(args: argparse.Namespace) -> int:
     return 0 if result.get("status") == "candidate" else 2
 
 
+def _export_lerobot(args: argparse.Namespace) -> int:
+    from .adapters.lerobot_export import export_insight_lerobot
+
+    result = export_insight_lerobot(
+        source=args.source.expanduser().resolve(),
+        review_manifest_path=args.review_manifest.expanduser().resolve(),
+        annotation_manifest_path=args.annotation_manifest.expanduser().resolve(),
+        decisions_path=args.decisions.expanduser().resolve(),
+        task_path=args.task_spec.expanduser().resolve(),
+        output=args.output.expanduser().resolve(),
+        repo_id=args.repo_id,
+        max_skew_ms=args.max_skew_ms,
+        vcodec=args.vcodec,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _validate_lerobot(args: argparse.Namespace) -> int:
+    from .adapters.lerobot_validation import validate_lerobot_dataset
+
+    result = validate_lerobot_dataset(args.dataset.expanduser().resolve())
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _resume(args: argparse.Namespace) -> int:
     config = SessionConfig.load(args.config.expanduser().resolve())
     try:
@@ -192,6 +218,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     suggest.add_argument("--output", type=Path)
     suggest.set_defaults(handler=_suggest)
+
+    export_lerobot = commands.add_parser(
+        "export-lerobot", help="export reviewed Insight data as LeRobotDataset v3"
+    )
+    export_lerobot.add_argument("--source", type=Path, required=True)
+    export_lerobot.add_argument("--review-manifest", type=Path, required=True)
+    export_lerobot.add_argument("--annotation-manifest", type=Path, required=True)
+    export_lerobot.add_argument("--decisions", type=Path, required=True)
+    export_lerobot.add_argument("--task-spec", type=Path, required=True)
+    export_lerobot.add_argument("--output", type=Path, required=True)
+    export_lerobot.add_argument("--repo-id", required=True)
+    export_lerobot.add_argument("--max-skew-ms", type=float)
+    export_lerobot.add_argument(
+        "--vcodec", choices=("h264", "hevc", "libsvtav1", "auto"), default="h264"
+    )
+    export_lerobot.set_defaults(handler=_export_lerobot)
+
+    validate_lerobot = commands.add_parser(
+        "validate-lerobot", help="validate a local LeRobotDataset v3 export"
+    )
+    validate_lerobot.add_argument("--dataset", type=Path, required=True)
+    validate_lerobot.set_defaults(handler=_validate_lerobot)
 
     resume = commands.add_parser("resume", help="prepare or run the next transition")
     resume.add_argument("--config", type=Path, required=True)

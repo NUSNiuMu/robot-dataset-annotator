@@ -54,6 +54,40 @@ NPZ 包含 `state` 和 `state_valid`；Insight review parquet 可改用
 `insight-review` 适配器从左右手同步位姿构造规范化状态；review manifest 不包含夹爪宽度，
 因此对应列保持无效。候选边界始终需要视觉确认，多循环结果位于 `episodes` 数组。
 
+## 导出 LeRobot
+
+Insight MCAP 在完成穷尽审核后可导出为 LeRobotDataset v3.0。导出器要求 ROS 2 环境提供
+`rosbag2_py` 和 MCAP 存储插件；LeRobot 放在独立环境中安装，当前 Python 3.10 兼容的验证
+版本固定为 0.4.4：
+
+```bash
+.venv/bin/pip install -r configs/lerobot-validator-py310.txt
+.venv/bin/pip install -e . --no-deps
+.venv/bin/rda export-lerobot \
+  --source recording/ \
+  --review-manifest recording/review/manifest.json \
+  --annotation-manifest recording/review/annotation_manifest.json \
+  --decisions recording/review/decisions.json \
+  --task-spec .rda/cup-stacking.json \
+  --output outputs/recording-segmented \
+  --repo-id local/recording-segmented
+```
+
+输出包含左右手和头部三路独立视频、18 维双手位姿观测、9 维头部位姿观测、有效性掩码、
+源帧索引和原子动作索引。`action` 是下一帧双手位姿目标；episode 最后一帧保持当前目标。
+它仍处于源追踪坐标系，未经过机器人重定向且不含夹爪命令，导出清单会显式保留这一限制。
+导出使用同目录临时产物完成后原子改名，拒绝覆盖已有数据集。
+
+在固定 LeRobot 环境中完成内部不变量检查、全部视频逐帧解码、官方 loader 索引和一个
+DataLoader batch：
+
+```bash
+.venv/bin/rda validate-lerobot --dataset outputs/recording-segmented
+```
+
+通过后会写入 `rda/internal_validation.json` 与 `rda/official_validation.json`；前者还包含
+Parquet/视频哈希和每个视频键的实际解码帧数。
+
 ## 分层
 
 ```text
