@@ -1,0 +1,18 @@
+{
+  "task_id": "cup-stacking",
+  "description": "Build a three-cup pyramid from one nested stack, then collapse it back into one nested stack.",
+  "plugin": "robot_dataset_annotator.tasks.cup_stacking:infer_cycle_boundaries",
+  "minimum_segment_frames": 10,
+  "atomic_actions": [
+    {
+      "key": "build_pyramid",
+      "label": "build_three_cup_pyramid",
+      "instruction": "Separate the three nested cups and build a stable pyramid with two cups on the bottom and one cup on top."
+    },
+    {
+      "key": "collapse_pyramid",
+      "label": "collapse_pyramid_to_nested_stack",
+      "instruction": "Dismantle the three-cup pyramid and collect all cups into one stable nested stack."
+    }
+  ]
+}

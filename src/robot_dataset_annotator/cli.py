@@ -94,8 +94,12 @@ def _suggest(args: argparse.Namespace) -> int:
         with np.load(args.observations) as payload:
             observations = np.asarray(payload["state"], dtype=np.float64)
             valid = np.asarray(payload["state_valid"], dtype=bool)
-    else:
+    elif args.format == "insight-parquet":
         from .adapters.insight_lowdim import load_fused_state
+
+        observations, valid = load_fused_state(args.observations)
+    else:
+        from .adapters.insight_review import load_fused_state
 
         observations, valid = load_fused_state(args.observations)
     result = load_suggester(task)(
@@ -182,7 +186,9 @@ def build_parser() -> argparse.ArgumentParser:
     suggest.add_argument("--task-spec", type=Path, required=True)
     suggest.add_argument("--observations", type=Path, required=True)
     suggest.add_argument(
-        "--format", choices=("npz", "insight-parquet"), default="npz"
+        "--format",
+        choices=("npz", "insight-parquet", "insight-review"),
+        default="npz",
     )
     suggest.add_argument("--output", type=Path)
     suggest.set_defaults(handler=_suggest)

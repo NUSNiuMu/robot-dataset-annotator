@@ -4,9 +4,10 @@
 rosbag、相机名称、任务类型、工作目录或导出格式；这些差异由任务插件、数据源适配器和会话
 配置提供。
 
-当前内置 `cup-pick-place` 任务，保留本次 30 个 Insight rosbag 生产中验证过的四阶段边界
-推断方法。新任务可以复用批次状态机、多人审核 schema、穷尽审核门和验收报告，不需要复制
-杯子任务代码。
+当前内置 `cup-pick-place` 和 `cup-stacking` 两个任务。前者保留 Insight rosbag 生产中验证
+过的四阶段边界推断方法；后者把三杯速叠循环定义为“搭塔”和“收拢”两阶段，并能从同步
+双手位姿提示同一源片段中的多个循环。新任务可以复用批次状态机、多人审核 schema、穷尽
+审核门和验收报告，不需要复制已有任务代码。
 
 ## 快速开始
 
@@ -43,7 +44,15 @@ Skill 不保存项目路径；每次新环境首次执行时会要求确认路�
 ```
 
 NPZ 包含 `state` 和 `state_valid`；Insight review parquet 可改用
-`--format insight-parquet`。候选边界始终需要视觉确认。
+`--format insight-parquet`。已有同步审核 manifest 可直接用于叠杯任务：
+
+```bash
+.venv/bin/rda suggest --task-spec .rda/cup-stacking.json \
+  --observations review/manifest.json --format insight-review
+```
+
+`insight-review` 适配器从左右手同步位姿构造规范化状态；review manifest 不包含夹爪宽度，
+因此对应列保持无效。候选边界始终需要视觉确认，多循环结果位于 `episodes` 数组。
 
 ## 分层
 

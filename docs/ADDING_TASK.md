@@ -8,5 +8,10 @@
 4. 如需新数据格式，在 `adapters/` 增加适配器，禁止把格式依赖带入 core。
 5. 用 `rda validate-decisions` 检查穷尽覆盖，再接入导出器和官方验证器。
 
+插件可以为单个候选返回 `boundaries`，也可以为同一源片段内的多个完整尝试返回按时间排序
+的 `episodes`。每个 episode 都必须包含源帧坐标下的 `episode_start_frame`、
+`episode_end_frame_exclusive` 和覆盖全部原子动作的 `atomic_boundaries`。这些结果仍只是审核
+提示，不能直接替代 decisions 中的视觉结论。
+
 自动门的优化指标至少同时报告候选精度和候选召回率。高精度低召回只适合加速人工确认，
 不能用于自动拒绝数据。

@@ -26,3 +26,9 @@ For cup pick-and-place, confirm stable acquisition, transport with the cup, entr
 zone, release with the cup remaining in the zone, and gripper retreat. A hand may set up the cup
 before the robot begins or remove it after completion only when that activity is outside the saved
 episode.
+
+For three-cup stacking, begin with one stable nested stack, confirm a stable pyramid with two cups
+on the bottom and one on top, then confirm that all three cups return to one stable nested stack.
+Use the first approach to the nested stack as the episode start, the renewed approach to the stable
+pyramid as the build/collapse boundary, and the completed gripper retreat as the exclusive end.
+Exclude camera handling and human setup or cleanup outside those bounds.

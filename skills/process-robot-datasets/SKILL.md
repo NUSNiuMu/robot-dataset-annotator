@@ -67,6 +67,14 @@ Read [references/review-standard.md](references/review-standard.md) before writi
 - Allow multiple non-overlapping episodes inside one PASS source segment.
 - Require monotonically increasing task boundaries and the configured minimum frames per action.
 
+For an Insight synchronized review manifest, run a task suggester without first producing parquet:
+
+    rda suggest --task-spec <task.json> --observations <review-manifest.json> \
+      --format insight-review
+
+The adapter exposes synchronized hand poses and marks absent gripper-width fields invalid. A task
+plugin may return multiple ordered candidates in `episodes`; confirm each one against all views.
+
 Create a schema-v2 template when needed:
 
     rda init-decisions --manifest <manifest.json> --output <decisions.json> \
