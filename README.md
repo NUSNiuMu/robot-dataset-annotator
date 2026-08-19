@@ -88,6 +88,16 @@ DataLoader batch：
 通过后会写入 `rda/internal_validation.json` 与 `rda/official_validation.json`；前者还包含
 Parquet/视频哈希和每个视频键的实际解码帧数。
 
+验证完成后要区分“工作数据集”和“严格交付包”。工作数据集保留 `rda/`，其中是导出清单、
+哈希和验证证据；该目录是 RDA 扩展，不属于 LeRobot v3 schema。官方写入器把逐帧图像编码成
+视频后，可能留下空的 `images/observation.images.*` 临时目录；必须先确认 `images/` 中没有
+任何文件，才能把这些空目录视为可清理产物。当前导出的图像特征均为 `dtype: video`，
+`meta/info.json` 通过 `video_path` 指向 `videos/` 下的 MP4，并不依赖空的根目录 `images/`。
+
+需要只含本任务官方数据文件的交付物时，应从已验证的工作数据集另外复制 `data/`、`meta/`、
+`videos/` 三个目录，并把 `rda/` 作为旁路证据与交付包并列保存；不要直接修改已经验证通过的
+工作数据集，也不能在 `images/` 仍有文件时删除它。
+
 ## 分层
 
 ```text

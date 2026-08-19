@@ -36,4 +36,10 @@ frame、原子动作、有效性和 next-frame action 不变量，再完整解�
 Python 3.10 验证环境的直接版本锁定位于 `configs/lerobot-validator-py310.txt`，不得把这组
 通用机器学习 wheel 安装进厂商设备 Python 环境。
 
+LeRobot 工作数据集与严格交付包是两个产物。工作数据集内的 `rda/` 保存导出 provenance 和
+验证 PASS 证据，是本项目扩展而不是 LeRobot v3 schema；严格交付副本只复制本视频数据集所
+引用的 `data/`、`meta/`、`videos/`，并把 `rda/` 证据保存在副本外。官方写入器可能遗留空的
+`images/<video-key>/` 编码暂存目录：只有确认其中没有文件时才可在交付副本中省略；如果存在
+文件，必须先查明 `meta/info.json` 的 feature dtype 和引用路径，不能按目录名直接删除。
+
 路径只出现在用户生成的会话配置中。仓库源码、任务配置和 Skill 禁止写入设备绝对路径。

@@ -108,6 +108,16 @@ This command must completely decode every video file before it writes internal P
 construct the official LeRobot loader, index representative rows, and read one DataLoader batch
 before it writes official PASS evidence.
 
+After validation, distinguish the working dataset from a strict LeRobot delivery package. The
+working dataset keeps `rda/` because the exporter and validators store provenance and PASS evidence
+there; `rda/` is an RDA extension, not part of the LeRobot v3 schema. The official writer may also
+leave empty `images/<video-key>/` staging directories after encoding `dtype: video` features. Check
+that `images/` contains no files before treating it as disposable; never remove it when files remain.
+For this video-backed export, create a separate strict delivery copy containing only `data/`,
+`meta/`, and `videos/`, keep the `rda/` evidence beside that copy, and do not modify the validated
+working dataset. The `observation.images.*` feature names in `meta/info.json` still point through
+`video_path` to MP4 files under `videos/`; they do not require the empty root `images/` directory.
+
 ## Resume and validate
 
 Read [references/recovery-and-validation.md](references/recovery-and-validation.md) after a
