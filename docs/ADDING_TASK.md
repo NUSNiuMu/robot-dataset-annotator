@@ -9,10 +9,12 @@
 4. 如需新数据格式，在 `adapters/` 增加适配器，禁止把格式依赖带入 core。
 5. 用 `rda validate-decisions` 检查穷尽覆盖，再接入导出器和官方验证器。
 
-需要左右手训练子语义时，在每个 `atomic_actions` 条目下定义 `hand_subtasks.left_hand` 和
-`hand_subtasks.right_hand`；未定义时 core 会生成带手别前缀的默认值。需要保留正式任务前
+需要与整体动作独立的左右手训练子语义时，在 task 顶层定义
+`hand_subtasks.left_hand` 和 `hand_subtasks.right_hand` 数组，并在每个 PASS episode 的
+`hand_subtask_boundaries` 中分别给出覆盖完整操作区间的边界流。未定义顶层数组时，core 仍
+支持在每个 `atomic_actions` 条目中定义手部语义，并使用整体动作边界。需要保留正式任务前
 上下文时，任务配置还要定义 `context_action`，decisions 才能使用 `context_start_frame`。
-上下文不属于原子任务边界，导出索引固定为 `-1`。
+上下文不属于原子任务或手部子任务边界，导出索引固定为 `-1`。
 
 插件可以为单个候选返回 `boundaries`，也可以为同一源片段内的多个完整尝试返回按时间排序
 的 `episodes`。每个 episode 都必须包含源帧坐标下的 `episode_start_frame`、

@@ -33,7 +33,10 @@ zone, release with the cup remaining in the zone, and gripper retreat. A hand ma
 before the robot begins or remove it after completion only when that activity is outside the saved
 episode.
 Confirm left- and right-hand subtask semantics separately; a stationary, supporting, or carrying
-hand remains a distinct subtask stream even when both hands share the same phase boundary.
+hand remains a distinct subtask stream even when both hands share the same phase boundary. Record
+both streams in `hand_subtask_boundaries`; their boundaries may cross the overall atomic boundaries.
+For cup pick-and-place, the left stream is approach/acquire, transport, release, retreat; the right
+stream is wait at drop zone, receive, guide/stabilize, retreat.
 
 For three-cup stacking, begin with one stable nested stack, confirm a stable pyramid with two cups
 on the bottom and one on top, then confirm that all three cups return to one stable nested stack.

@@ -76,8 +76,10 @@ first producing parquet:
       --format insight-review
 
 `cup-pick-place` intentionally has no automatic splitter. Review it manually, keep the QR calibration
-prefix with `context_start_frame`, and record all four manipulation boundaries in original
-source-frame coordinates.
+prefix with `context_start_frame`, and record the overall atomic boundaries plus independent
+left/right hand subtask boundaries in original source-frame coordinates. A waiting right hand must
+remain `right_hand_wait`; do not relabel it as acquisition or transport merely because the left hand
+is moving.
 
 The adapter exposes synchronized hand poses and marks absent gripper-width fields invalid. A task
 plugin may return multiple ordered candidates in `episodes`; confirm each one against all views.
@@ -102,9 +104,22 @@ pose in the global tracking frame before export:
 
 When the printed square is ArUco rather than a standard QR code, add
 `--marker-type aruco --aruco-dictionary <dictionary> --aruco-marker-id <id>`.
+For the standard UMI `DICT_4X4_50` marker ID 4, use the configured 0.06 m black-square edge; do not
+substitute the 0.16 m workspace-marker size used by other UMI IDs.
 
 The JSON stores `global_from_qr` and `qr_from_global`. It is calibration evidence only: do not
 rewrite camera poses or discard the source context after producing it.
+
+Before QR calibration or export, audit global pose continuity:
+
+    rda correct-pose-drift --review-manifest <review-dir>/manifest.json \
+      --output-manifest <review-dir>/manifest_pose_corrected.json \
+      --audit <review-dir>/pose_drift_audit.json
+
+Use the corrected manifest only when the audit is `PASS`. The command may interpolate paired short
+spikes or stitch a high-confidence persistent coordinate jump while preserving subsequent relative
+motion. It writes a new manifest with raw arrays and correction masks; ambiguous jumps remain
+unchanged and force `NEEDS_REVIEW`.
 
 For a reviewed single-segment Insight MCAP, export three source camera streams and synchronized
 poses to LeRobotDataset v3.0 with explicit paths:

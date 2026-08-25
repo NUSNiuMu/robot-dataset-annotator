@@ -128,10 +128,20 @@ def _validate_low_dimensional_data(
         else len(set(int(value) for value in atomic_actions if value >= 0))
     )
     expected_actions = np.arange(action_count, dtype=np.int64)
-    subtask_catalog = {
-        (int(row["atomic_action_index"]), str(row["hand"])): int(row["index"])
-        for row in (export or {}).get("subtask_semantics", [])
+    subtask_catalog: dict[str, list[tuple[int, int]]] = {
+        "left_hand": [],
+        "right_hand": [],
     }
+    for row in (export or {}).get("subtask_semantics", []):
+        hand = str(row["hand"])
+        if hand not in subtask_catalog:
+            raise ValueError(f"unknown hand in subtask catalog: {hand}")
+        phase_index = int(
+            row.get("phase_index", row.get("atomic_action_index", -1))
+        )
+        subtask_catalog[hand].append((phase_index, int(row["index"])))
+    for rows in subtask_catalog.values():
+        rows.sort()
     for expected_episode, metadata in enumerate(episodes):
         start = int(metadata["dataset_from_index"])
         end = int(metadata["dataset_to_index"])
@@ -210,38 +220,48 @@ def _validate_low_dimensional_data(
                 raise ValueError(
                     f"episode {expected_episode} task progress is not linear"
                 )
-            episode_left_subtasks = left_subtasks[selection]
-            episode_right_subtasks = right_subtasks[selection]
-            for action_index in np.unique(episode_actions):
-                matched = episode_actions == action_index
-                for hand, values, progress in (
+            for hand, values, progress in (
+                (
+                    "left_hand",
+                    left_subtasks[selection],
+                    episode_left_progress,
+                ),
+                (
+                    "right_hand",
+                    right_subtasks[selection],
+                    episode_right_progress,
+                ),
+            ):
+                expected = [
+                    index
+                    for phase, index in subtask_catalog[hand]
+                    if phase >= 0 or np.any(context)
+                ]
+                if not expected:
+                    raise ValueError(f"missing {hand} subtask catalog")
+                run_starts = np.concatenate(
                     (
-                        "left_hand",
-                        episode_left_subtasks,
-                        episode_left_progress,
-                    ),
-                    (
-                        "right_hand",
-                        episode_right_subtasks,
-                        episode_right_progress,
-                    ),
-                ):
-                    expected_subtask = subtask_catalog.get((int(action_index), hand))
-                    if expected_subtask is None or not np.all(
-                        values[matched] == expected_subtask
-                    ):
-                        raise ValueError(
-                            f"episode {expected_episode} has invalid {hand} subtask"
-                        )
+                        np.asarray([0]),
+                        np.flatnonzero(values[1:] != values[:-1]) + 1,
+                    )
+                )
+                run_ends = np.concatenate((run_starts[1:], np.asarray([len(values)])))
+                actual = [int(values[start]) for start in run_starts]
+                if actual != expected:
+                    raise ValueError(
+                        f"episode {expected_episode} has invalid independent "
+                        f"{hand} subtask order: {actual}, expected {expected}"
+                    )
+                for start, end in zip(run_starts, run_ends):
                     expected_subtask_progress = np.linspace(
-                        0.0, 1.0, int(np.count_nonzero(matched)), dtype=np.float32
+                        0.0, 1.0, int(end - start), dtype=np.float32
                     )
                     if not np.allclose(
-                        progress[matched], expected_subtask_progress, atol=1e-6
+                        progress[start:end], expected_subtask_progress, atol=1e-6
                     ):
                         raise ValueError(
-                            f"episode {expected_episode} has invalid {hand} "
-                            "subtask progress"
+                            f"episode {expected_episode} has invalid independent "
+                            f"{hand} subtask progress"
                         )
         episode_state = state[selection]
         episode_valid = state_valid[selection]

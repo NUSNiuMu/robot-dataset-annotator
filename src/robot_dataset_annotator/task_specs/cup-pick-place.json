@@ -1,92 +1,90 @@
 {
   "task_id": "cup-pick-place",
-  "description": "Pick up a disposable cup and place it into a drop zone.",
+  "description": "Pick up a disposable cup with the left hand and transfer it to the right hand at the drop zone.",
   "minimum_segment_frames": 10,
   "context_action": {
     "key": "qr_localization_context",
     "label": "observe_qr_for_coordinate_localization",
-    "instruction": "Observe the QR marker and preserve these context frames for coordinate localization.",
+    "instruction": "Observe the ArUco marker and preserve these context frames for coordinate localization.",
     "hand_subtasks": {
       "left_hand": {
         "key": "left_hand_qr_localization_context",
-        "label": "left_hand_during_qr_localization",
-        "instruction": "Keep the left hand observable while the QR coordinate frame is established."
+        "label": "left_hand_during_aruco_localization",
+        "instruction": "Keep the left hand observable while the ArUco coordinate frame is established."
       },
       "right_hand": {
         "key": "right_hand_qr_localization_context",
-        "label": "right_hand_during_qr_localization",
-        "instruction": "Keep the right hand observable while the QR coordinate frame is established."
+        "label": "right_hand_during_aruco_localization",
+        "instruction": "Keep the right hand observable while the ArUco coordinate frame is established."
       }
     }
+  },
+  "hand_subtasks": {
+    "left_hand": [
+      {
+        "key": "left_hand_approach_acquire",
+        "label": "left_hand_approach_and_acquire_cup",
+        "instruction": "Approach and acquire the cup with the left hand."
+      },
+      {
+        "key": "left_hand_transport",
+        "label": "left_hand_transport_cup_to_drop_zone",
+        "instruction": "Transport the acquired cup to the drop zone with the left hand."
+      },
+      {
+        "key": "left_hand_release",
+        "label": "left_hand_release_cup_at_drop_zone",
+        "instruction": "Release the cup at the drop zone with the left hand."
+      },
+      {
+        "key": "left_hand_retreat",
+        "label": "left_hand_retreat_from_drop_zone",
+        "instruction": "Retreat the left hand after releasing the cup."
+      }
+    ],
+    "right_hand": [
+      {
+        "key": "right_hand_wait",
+        "label": "right_hand_wait_at_drop_zone",
+        "instruction": "Wait at the drop zone with the right hand; do not label waiting as acquisition or transport."
+      },
+      {
+        "key": "right_hand_receive",
+        "label": "right_hand_receive_arriving_cup",
+        "instruction": "Receive the arriving cup with the right hand."
+      },
+      {
+        "key": "right_hand_guide_stabilize",
+        "label": "right_hand_guide_or_stabilize_cup",
+        "instruction": "Guide or stabilize the cup with the right hand while placement is completed."
+      },
+      {
+        "key": "right_hand_retreat",
+        "label": "right_hand_retreat_from_drop_zone",
+        "instruction": "Retreat the right hand after placement is complete."
+      }
+    ]
   },
   "atomic_actions": [
     {
       "key": "approach_acquire",
       "label": "approach_and_acquire_cup",
-      "instruction": "Approach and acquire the disposable cup with the grippers.",
-      "hand_subtasks": {
-        "left_hand": {
-          "key": "left_hand_approach_acquire",
-          "label": "left_hand_during_cup_approach_and_acquisition",
-          "instruction": "Use the left hand to approach, acquire, or stabilize the cup as observed."
-        },
-        "right_hand": {
-          "key": "right_hand_approach_acquire",
-          "label": "right_hand_during_cup_approach_and_acquisition",
-          "instruction": "Use the right hand to approach, acquire, or stabilize the cup as observed."
-        }
-      }
+      "instruction": "Approach and acquire the disposable cup."
     },
     {
       "key": "transport",
-      "label": "transport_cup_to_box",
-      "instruction": "Transport the acquired disposable cup to the box.",
-      "hand_subtasks": {
-        "left_hand": {
-          "key": "left_hand_transport",
-          "label": "left_hand_during_cup_transport",
-          "instruction": "Use the left hand to carry or support the cup during transport as observed."
-        },
-        "right_hand": {
-          "key": "right_hand_transport",
-          "label": "right_hand_during_cup_transport",
-          "instruction": "Use the right hand to carry or support the cup during transport as observed."
-        }
-      }
+      "label": "transport_cup_to_drop_zone",
+      "instruction": "Transport the acquired disposable cup to the drop zone."
     },
     {
       "key": "place_release",
       "label": "place_and_release_cup_in_drop_zone",
-      "instruction": "Place and release the disposable cup in the box drop zone.",
-      "hand_subtasks": {
-        "left_hand": {
-          "key": "left_hand_place_release",
-          "label": "left_hand_during_cup_placement_and_release",
-          "instruction": "Use the left hand to place, release, or stabilize the cup as observed."
-        },
-        "right_hand": {
-          "key": "right_hand_place_release",
-          "label": "right_hand_during_cup_placement_and_release",
-          "instruction": "Use the right hand to place, release, or stabilize the cup as observed."
-        }
-      }
+      "instruction": "Place and release the disposable cup in the drop zone."
     },
     {
       "key": "retreat",
       "label": "retreat_from_drop_zone",
-      "instruction": "Retreat the grippers from the box drop zone.",
-      "hand_subtasks": {
-        "left_hand": {
-          "key": "left_hand_retreat",
-          "label": "left_hand_retreat_from_drop_zone",
-          "instruction": "Retreat the left hand from the drop zone."
-        },
-        "right_hand": {
-          "key": "right_hand_retreat",
-          "label": "right_hand_retreat_from_drop_zone",
-          "instruction": "Retreat the right hand from the drop zone."
-        }
-      }
+      "instruction": "Retreat both hands from the drop zone as observed."
     }
   ]
 }

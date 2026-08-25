@@ -75,8 +75,32 @@ def _normalize_episodes(review: dict[str, Any]) -> list[dict[str, Any]]:
             "episode_start_frame": review["episode_start_frame"],
             "episode_end_frame_exclusive": review["episode_end_frame_exclusive"],
             "atomic_boundaries": review.get("atomic_boundaries", []),
+            "hand_subtask_boundaries": review.get("hand_subtask_boundaries"),
         }
     ]
+
+
+def episode_hand_subtask_boundaries(
+    episode: dict[str, Any],
+    task: TaskSpec,
+    hand: str,
+    atomic_boundaries: list[int],
+) -> list[int]:
+    rows = episode.get("hand_subtask_boundaries")
+    if rows is None:
+        subtasks = task.subtasks_for_hand(hand)
+        if len(subtasks) != len(task.actions):
+            raise ValueError(
+                f"legacy decisions cannot infer {hand} boundaries: task has "
+                f"{len(subtasks)} hand subtasks and {len(task.actions)} actions"
+            )
+        return list(atomic_boundaries)
+    if not isinstance(rows, dict):
+        raise ValueError("hand_subtask_boundaries must be an object")
+    values = rows.get(hand)
+    if not isinstance(values, list):
+        raise ValueError(f"hand_subtask_boundaries must define {hand}")
+    return [int(value) for value in values]
 
 
 def validate_decisions(
@@ -148,6 +172,36 @@ def validate_decisions(
                         "atomic action is shorter "
                         f"than {task.minimum_segment_frames} frames"
                     )
+                for hand in ("left_hand", "right_hand"):
+                    hand_boundaries = episode_hand_subtask_boundaries(
+                        episode, task, hand, boundaries
+                    )
+                    expected = len(task.subtasks_for_hand(hand)) + 1
+                    if len(hand_boundaries) != expected:
+                        raise ValueError(
+                            f"segment {index} episode {episode_index}: expected "
+                            f"{expected} {hand} subtask boundaries"
+                        )
+                    if hand_boundaries[0] != start or hand_boundaries[-1] != end:
+                        raise ValueError(
+                            f"segment {index} episode {episode_index}: {hand} "
+                            "subtask boundaries must cover episode"
+                        )
+                    hand_lengths = [
+                        right - left
+                        for left, right in zip(
+                            hand_boundaries, hand_boundaries[1:]
+                        )
+                    ]
+                    if any(
+                        length < task.minimum_segment_frames
+                        for length in hand_lengths
+                    ):
+                        raise ValueError(
+                            f"segment {index} episode {episode_index}: {hand} "
+                            "subtask is shorter than "
+                            f"{task.minimum_segment_frames} frames"
+                        )
                 previous_end = end
                 episode_count += 1
             pass_count += 1

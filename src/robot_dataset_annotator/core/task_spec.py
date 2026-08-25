@@ -40,6 +40,8 @@ class TaskSpec:
     minimum_segment_frames: int
     actions: tuple[AtomicAction, ...]
     context_action: AtomicAction | None = None
+    left_hand_subtasks: tuple[SubtaskSemantic, ...] = ()
+    right_hand_subtasks: tuple[SubtaskSemantic, ...] = ()
 
     @staticmethod
     def _semantic(payload: dict[str, str]) -> SubtaskSemantic:
@@ -80,6 +82,22 @@ class TaskSpec:
         context_payload = payload.get("context_action")
         if context_payload is not None and not isinstance(context_payload, dict):
             raise ValueError("context_action must be an object")
+        hand_subtasks = payload.get("hand_subtasks", {})
+        if not isinstance(hand_subtasks, dict):
+            raise ValueError("task hand_subtasks must be an object")
+
+        def load_hand(hand: str) -> tuple[SubtaskSemantic, ...]:
+            rows = hand_subtasks.get(hand, [])
+            if not isinstance(rows, list):
+                raise ValueError(f"task {hand} subtasks must be an array")
+            return tuple(cls._semantic(row) for row in rows)
+
+        left_hand_subtasks = load_hand("left_hand")
+        right_hand_subtasks = load_hand("right_hand")
+        if bool(left_hand_subtasks) != bool(right_hand_subtasks):
+            raise ValueError(
+                "task-level left_hand and right_hand subtasks must be defined together"
+            )
         return cls(
             task_id=str(payload["task_id"]),
             description=str(payload["description"]),
@@ -89,34 +107,58 @@ class TaskSpec:
             context_action=(
                 cls._action(context_payload) if context_payload is not None else None
             ),
+            left_hand_subtasks=left_hand_subtasks,
+            right_hand_subtasks=right_hand_subtasks,
         )
 
-    def subtask_index(self, action_index: int, hand: str) -> int:
+    def subtasks_for_hand(self, hand: str) -> tuple[SubtaskSemantic, ...]:
         if hand not in {"left_hand", "right_hand"}:
             raise ValueError(f"unknown hand: {hand}")
-        if action_index < -1 or action_index >= len(self.actions):
-            raise ValueError(f"unknown action index: {action_index}")
-        if action_index == -1:
+        explicit = (
+            self.left_hand_subtasks
+            if hand == "left_hand"
+            else self.right_hand_subtasks
+        )
+        if explicit:
+            return explicit
+        return tuple(action.for_hand(hand) for action in self.actions)
+
+    def subtask_index(self, phase_index: int, hand: str) -> int:
+        subtasks = self.subtasks_for_hand(hand)
+        if phase_index < -1 or phase_index >= len(subtasks):
+            raise ValueError(f"unknown {hand} subtask phase: {phase_index}")
+        if phase_index == -1:
             if self.context_action is None:
                 raise ValueError("task has no context action")
-            phase = 0
-        else:
-            phase = action_index + (1 if self.context_action is not None else 0)
-        return 2 * phase + (1 if hand == "right_hand" else 0)
+            return 1 if hand == "right_hand" else 0
+        offset = 2 if self.context_action is not None else 0
+        if hand == "right_hand":
+            offset += len(self.subtasks_for_hand("left_hand"))
+        return offset + phase_index
 
     def subtask_catalog(self) -> list[dict[str, str | int]]:
         result: list[dict[str, str | int]] = []
-        phases: list[tuple[int, AtomicAction]] = []
         if self.context_action is not None:
-            phases.append((-1, self.context_action))
-        phases.extend(enumerate(self.actions))
-        for action_index, action in phases:
             for hand in ("left_hand", "right_hand"):
-                semantic = action.for_hand(hand)
+                semantic = self.context_action.for_hand(hand)
                 result.append(
                     {
-                        "index": self.subtask_index(action_index, hand),
-                        "atomic_action_index": action_index,
+                        "index": self.subtask_index(-1, hand),
+                        "phase_index": -1,
+                        "atomic_action_index": -1,
+                        "hand": hand,
+                        "key": semantic.key,
+                        "label": semantic.label,
+                        "instruction": semantic.instruction,
+                    }
+                )
+        for hand in ("left_hand", "right_hand"):
+            for phase_index, semantic in enumerate(self.subtasks_for_hand(hand)):
+                result.append(
+                    {
+                        "index": self.subtask_index(phase_index, hand),
+                        "phase_index": phase_index,
+                        "atomic_action_index": phase_index,
                         "hand": hand,
                         "key": semantic.key,
                         "label": semantic.label,

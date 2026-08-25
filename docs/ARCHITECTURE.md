@@ -21,7 +21,9 @@ DISCOVERED
 episode 可选的 `context_start_frame` 允许保留正式任务开始前的连续上下文，且必须满足
 `context_start_frame <= episode_start_frame`。旧 decisions 缺少该字段时视为两者相等。
 任务配置只有定义 `context_action` 才能接受上下文帧。上下文使用原子动作索引 `-1`，不会
-改变原有动作边界；左右手 subtask ID 使用独立的全局编号，逐帧进度由导出器确定性生成。
+改变原有动作边界；左右手 subtask 使用各自的完整边界流，允许跨越整体动作边界。subtask ID
+使用独立的全局编号，逐帧进度由导出器确定性生成。旧 decisions 未提供手部边界时，仅当手部
+阶段数与整体动作数相等才按整体边界兼容读取。
 
 任务插件只负责从规范化观测提出候选边界。候选是审核提示，不可替代人工视觉结论。数据源
 适配器负责把原始数据变成规范化观测；导出适配器负责生成训练格式并写验收证据。
@@ -44,6 +46,11 @@ review manifest，视频来自原始相机消息；动作语义、同步误差�
 指定字典与 ID 的 ArUco 方形标记，使用
 已确认的实物边长和相机内参求解 PnP，再结合头部全局 pose 与静态外参得到
 `global_from_qr`。结果和逆矩阵写入独立 JSON；它不变换或覆盖数据集中的任何相机 pose。
+
+`adapters/pose_drift.py` 在导出前审计三路低维全局 pose。成对的大跳变会被视为短尖峰并在
+SE(3) 上插值；单次极大跳变且后续局部运动稳定时，会拼接坐标段而不改变后续相对运动。
+不满足高置信度条件的跳变只写 `NEEDS_REVIEW`。修复结果写到新 manifest，保留原始数组、
+逐帧 correction mask、阈值和事件审计，不覆盖源 review manifest。
 
 `adapters/lerobot_validation.py` 先直接检查 Parquet 的 row、episode、timestamp、source
 frame、原子动作、有效性和 next-frame action 不变量，再完整解码每一个视频文件。随后用

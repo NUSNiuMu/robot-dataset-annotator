@@ -12,7 +12,7 @@ from uuid import uuid4
 
 import numpy as np
 
-from ..core.decisions import validate_decisions
+from ..core.decisions import episode_hand_subtask_boundaries, validate_decisions
 from ..core.io import read_json, write_json_atomic
 from ..core.task_spec import TaskSpec
 from .insight_frames import head_frame_calibration
@@ -182,6 +182,9 @@ def build_frame_plan(
                         "episode_end_frame_exclusive"
                     ],
                     "atomic_boundaries": review.get("atomic_boundaries", []),
+                    "hand_subtask_boundaries": review.get(
+                        "hand_subtask_boundaries"
+                    ),
                 }
             )
 
@@ -195,59 +198,68 @@ def build_frame_plan(
         context_start = int(episode.get("context_start_frame", episode_start))
         episode_plans: list[FramePlan] = []
 
-        ranges: list[tuple[int, Any, int, int]] = []
-        if context_start < episode_start:
-            if task.context_action is None:
-                raise ValueError("context frames require a task context_action")
-            ranges.append((-1, task.context_action, context_start, episode_start))
-        ranges.extend(
-            (
-                action_index,
-                action,
-                boundaries[action_index],
-                boundaries[action_index + 1],
+        hand_boundaries = {
+            hand: episode_hand_subtask_boundaries(
+                episode, task, hand, boundaries
             )
-            for action_index, action in enumerate(task.actions)
-        )
+            for hand in ("left_hand", "right_hand")
+        }
+
+        def phase_at(frame: int, phase_boundaries: list[int]) -> int:
+            return int(np.searchsorted(phase_boundaries, frame, side="right") - 1)
+
         task_denominator = max(1, episode_end - episode_start - 1)
-        for action_index, action, range_start, range_end in ranges:
-            subtask_denominator = max(1, range_end - range_start - 1)
-            for source_frame in range(range_start, range_end):
-                task_progress = (
-                    0.0
-                    if action_index == -1
-                    else (source_frame - episode_start) / task_denominator
+        for source_frame in range(context_start, episode_end):
+            if source_frame < episode_start:
+                if task.context_action is None:
+                    raise ValueError("context frames require a task context_action")
+                action_index = -1
+                action = task.context_action
+                left_phase = right_phase = -1
+                left_progress = right_progress = 0.0
+            else:
+                action_index = phase_at(source_frame, boundaries)
+                action = task.actions[action_index]
+                left_phase = phase_at(source_frame, hand_boundaries["left_hand"])
+                right_phase = phase_at(source_frame, hand_boundaries["right_hand"])
+
+                def hand_progress(hand: str, phase: int) -> float:
+                    start = hand_boundaries[hand][phase]
+                    end = hand_boundaries[hand][phase + 1]
+                    return float((source_frame - start) / max(1, end - start - 1))
+
+                left_progress = hand_progress("left_hand", left_phase)
+                right_progress = hand_progress("right_hand", right_phase)
+            task_progress = (
+                0.0
+                if action_index == -1
+                else (source_frame - episode_start) / task_denominator
+            )
+            episode_plans.append(
+                FramePlan(
+                    source_frame=source_frame,
+                    episode_index=episode_index,
+                    atomic_action_index=action_index,
+                    left_hand_subtask_index=task.subtask_index(
+                        left_phase, "left_hand"
+                    ),
+                    right_hand_subtask_index=task.subtask_index(
+                        right_phase, "right_hand"
+                    ),
+                    task_progress=float(task_progress),
+                    left_hand_subtask_progress=float(left_progress),
+                    right_hand_subtask_progress=float(right_progress),
+                    task=action.instruction,
+                    state=hands[source_frame],
+                    state_valid=hands_valid[source_frame],
+                    head_pose=head[source_frame],
+                    head_pose_valid=head_valid[source_frame],
+                    head_camera_pose_global=head_camera[source_frame],
+                    head_camera_pose_global_valid=head_camera_valid[source_frame],
+                    action=np.empty(0, dtype=np.float32),
+                    action_valid=np.empty(0, dtype=bool),
                 )
-                subtask_progress = (
-                    0.0
-                    if range_end - range_start == 1
-                    else (source_frame - range_start) / subtask_denominator
-                )
-                episode_plans.append(
-                    FramePlan(
-                        source_frame=source_frame,
-                        episode_index=episode_index,
-                        atomic_action_index=action_index,
-                        left_hand_subtask_index=task.subtask_index(
-                            action_index, "left_hand"
-                        ),
-                        right_hand_subtask_index=task.subtask_index(
-                            action_index, "right_hand"
-                        ),
-                        task_progress=float(task_progress),
-                        left_hand_subtask_progress=float(subtask_progress),
-                        right_hand_subtask_progress=float(subtask_progress),
-                        task=action.instruction,
-                        state=hands[source_frame],
-                        state_valid=hands_valid[source_frame],
-                        head_pose=head[source_frame],
-                        head_pose_valid=head_valid[source_frame],
-                        head_camera_pose_global=head_camera[source_frame],
-                        head_camera_pose_global_valid=head_camera_valid[source_frame],
-                        action=np.empty(0, dtype=np.float32),
-                        action_valid=np.empty(0, dtype=bool),
-                    )
-                )
+            )
         for index, plan in enumerate(episode_plans):
             target = episode_plans[min(index + 1, len(episode_plans) - 1)]
             episode_plans[index] = FramePlan(
@@ -728,6 +740,13 @@ def export_insight_lerobot(
                 "decisions_sha256": _sha256(decisions_path),
                 "task_spec_sha256": _sha256(task_path),
             },
+            "pose_drift_correction": review_manifest.get(
+                "pose_drift_correction",
+                {
+                    "schema_version": 1,
+                    "status": "NOT_RUN",
+                },
+            ),
         }
         write_json_atomic(temporary / "rda" / "export_manifest.json", export_manifest)
         os.replace(temporary, output)

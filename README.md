@@ -59,9 +59,17 @@ NPZ 输入包含 `state` 和 `state_valid`；Insight review parquet 可改用
   "context_start_frame": 0,
   "episode_start_frame": 120,
   "episode_end_frame_exclusive": 920,
-  "atomic_boundaries": [120, 260, 520, 760, 920]
+  "atomic_boundaries": [120, 260, 520, 760, 920],
+  "hand_subtask_boundaries": {
+    "left_hand": [120, 260, 520, 760, 920],
+    "right_hand": [120, 470, 560, 760, 920]
+  }
 }
 ```
+
+`atomic_boundaries` 描述整体操作阶段；左右手训练语义由两个独立边界流描述，不要求与整体
+阶段对齐。`cup-pick-place` 的左手阶段是接近并夹取、搬运、释放、撤离；右手阶段是投放区
+等待、接取到达的杯子、引导或稳定、撤离。静止等待的右手不能标成夹取或搬运。
 
 已知二维码黑色方形区域的实际边长后，可用保留的头部帧、相机内参、头部全局 pose 和 MCAP
 中的静态外参估计二维码在全局坐标系下的变换：
@@ -69,21 +77,36 @@ NPZ 输入包含 `state` 和 `state_valid`；Insight review parquet 可改用
 ```bash
 .venv/bin/rda calibrate-qr \
   --source recording/ \
-  --review-manifest recording/review/manifest.json \
-  --marker-size-m 0.10 \
+  --review-manifest recording/review/manifest_pose_corrected.json \
+  --marker-size-m 0.06 \
   --frame-start 0 --frame-end-exclusive 120 \
+  --marker-type aruco --aruco-dictionary DICT_4X4_50 --aruco-marker-id 4 \
   --output recording/review/qr_transform.json
 ```
 
-若桌面标记实际为 ArUco，可显式指定类型、字典和 ID，例如
-`--marker-type aruco --aruco-dictionary DICT_4X4_50 --aruco-marker-id 4`。普通 QR 仍是
-默认检测方式。两种方式都使用打印图案黑色方块的实测边长，并在标定 JSON 中记录检测器
-配置。
+这里的 UMI 桌面 ArUco 使用 `DICT_4X4_50`、ID 4，官方配置的黑色方块边长为 0.06 m。
+普通 QR 仍是默认检测方式；其他打印件必须使用实际测量的黑色方块边长。两种方式都会在
+标定 JSON 中记录检测器配置。
 
 输出 JSON 保存 `global_from_qr`、`qr_from_global`、参与估计的源帧、重投影误差、坐标系名称、
 二维码尺寸和输入哈希。工具不修改三路相机 pose，也不自动把训练数据转换到二维码坐标系；
 后续使用者可按 JSON 中的矩阵自行变换。二维码坐标原点位于图案中心，X 指向图案右侧，Y
 指向图案上方，Z 从印刷面向外。
+
+若全局 pose 只有瞬时尖峰，或发生一次坐标系跳变后相对运动仍连续，可先生成不覆盖原始值的
+修复 manifest：
+
+```bash
+.venv/bin/rda correct-pose-drift \
+  --review-manifest recording/review/manifest.json \
+  --output-manifest recording/review/manifest_pose_corrected.json \
+  --audit recording/review/pose_drift_audit.json
+```
+
+高置信度短尖峰使用相邻有效 pose 插值；高置信度持续跳变从跳变帧起拼接回上一坐标段，保留
+后续相对运动。中等幅度或连续异常会标成 `NEEDS_REVIEW`，不会自动修改。修复 manifest 同时
+保留 `raw_positions`、`raw_quaternions_xyzw` 和逐帧 correction mask；导出与 ArUco 标定都应
+使用审核通过的修复 manifest。
 
 ## 导出 LeRobot
 

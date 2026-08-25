@@ -39,6 +39,69 @@ def rotation_6d(matrices: np.ndarray) -> np.ndarray:
     return np.concatenate((values[:, :, 0], values[:, :, 1]), axis=1)
 
 
+def rotation_matrices_to_quaternions(matrices: np.ndarray) -> np.ndarray:
+    values = np.asarray(matrices, dtype=np.float64)
+    if values.ndim != 3 or values.shape[1:] != (3, 3):
+        raise ValueError("rotation matrices must have shape Nx3x3")
+    result = np.empty((len(values), 4), dtype=np.float64)
+    for index, matrix in enumerate(values):
+        trace = float(np.trace(matrix))
+        if trace > 0.0:
+            scale = np.sqrt(trace + 1.0) * 2.0
+            result[index] = [
+                (matrix[2, 1] - matrix[1, 2]) / scale,
+                (matrix[0, 2] - matrix[2, 0]) / scale,
+                (matrix[1, 0] - matrix[0, 1]) / scale,
+                0.25 * scale,
+            ]
+        else:
+            axis = int(np.argmax(np.diag(matrix)))
+            if axis == 0:
+                scale = (
+                    np.sqrt(
+                        1.0 + matrix[0, 0] - matrix[1, 1] - matrix[2, 2]
+                    )
+                    * 2.0
+                )
+                result[index] = [
+                    0.25 * scale,
+                    (matrix[0, 1] + matrix[1, 0]) / scale,
+                    (matrix[0, 2] + matrix[2, 0]) / scale,
+                    (matrix[2, 1] - matrix[1, 2]) / scale,
+                ]
+            elif axis == 1:
+                scale = (
+                    np.sqrt(
+                        1.0 + matrix[1, 1] - matrix[0, 0] - matrix[2, 2]
+                    )
+                    * 2.0
+                )
+                result[index] = [
+                    (matrix[0, 1] + matrix[1, 0]) / scale,
+                    0.25 * scale,
+                    (matrix[1, 2] + matrix[2, 1]) / scale,
+                    (matrix[0, 2] - matrix[2, 0]) / scale,
+                ]
+            else:
+                scale = (
+                    np.sqrt(
+                        1.0 + matrix[2, 2] - matrix[0, 0] - matrix[1, 1]
+                    )
+                    * 2.0
+                )
+                result[index] = [
+                    (matrix[0, 2] + matrix[2, 0]) / scale,
+                    (matrix[1, 2] + matrix[2, 1]) / scale,
+                    0.25 * scale,
+                    (matrix[1, 0] - matrix[0, 1]) / scale,
+                ]
+    result /= np.linalg.norm(result, axis=1, keepdims=True)
+    for index in range(1, len(result)):
+        if np.dot(result[index - 1], result[index]) < 0.0:
+            result[index] *= -1.0
+    return result
+
+
 def pose_matrices(
     positions: np.ndarray, quaternions: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:

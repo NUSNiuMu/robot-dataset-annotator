@@ -167,6 +167,19 @@ def _validate_lerobot(args: argparse.Namespace) -> int:
     return 0
 
 
+def _correct_pose_drift(args: argparse.Namespace) -> int:
+    from .adapters.pose_drift import correct_review_manifest_pose_drift
+
+    result = correct_review_manifest_pose_drift(
+        review_manifest_path=args.review_manifest.expanduser().resolve(),
+        output_manifest_path=args.output_manifest.expanduser().resolve(),
+        audit_path=args.audit.expanduser().resolve(),
+        maximum_spike_frames=args.maximum_spike_frames,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0 if result["status"] == "PASS" else 2
+
+
 def _resume(args: argparse.Namespace) -> int:
     config = SessionConfig.load(args.config.expanduser().resolve())
     try:
@@ -301,6 +314,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate_lerobot.add_argument("--dataset", type=Path, required=True)
     validate_lerobot.set_defaults(handler=_validate_lerobot)
+
+    correct_pose_drift = commands.add_parser(
+        "correct-pose-drift",
+        help="repair high-confidence pose spikes and coordinate-frame jumps",
+    )
+    correct_pose_drift.add_argument("--review-manifest", type=Path, required=True)
+    correct_pose_drift.add_argument("--output-manifest", type=Path, required=True)
+    correct_pose_drift.add_argument("--audit", type=Path, required=True)
+    correct_pose_drift.add_argument("--maximum-spike-frames", type=int, default=3)
+    correct_pose_drift.set_defaults(handler=_correct_pose_drift)
 
     resume = commands.add_parser("resume", help="prepare or run the next transition")
     resume.add_argument("--config", type=Path, required=True)
