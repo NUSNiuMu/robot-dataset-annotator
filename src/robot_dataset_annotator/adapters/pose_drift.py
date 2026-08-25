@@ -111,6 +111,45 @@ def _progressive_drift_clusters(
     return result
 
 
+def _settling_jump_clusters(
+    jump_steps: list[int],
+    translation_steps: np.ndarray,
+    rotation_steps: np.ndarray,
+    *,
+    count: int,
+    persistent_translation: float,
+    persistent_rotation: float,
+) -> list[list[int]]:
+    """Find a short multi-step coordinate jump followed by stable tracking."""
+    if not jump_steps:
+        return []
+    clusters: list[list[int]] = [[jump_steps[0]]]
+    for step in jump_steps[1:]:
+        if step - clusters[-1][-1] <= 3:
+            clusters[-1].append(step)
+        else:
+            clusters.append([step])
+    jump_set = set(jump_steps)
+    result: list[list[int]] = []
+    for cluster in clusters:
+        if len(cluster) < 2:
+            continue
+        end = cluster[-1] + 1
+        stable_end = min(count, end + 6)
+        if stable_end - end < 6 or any(
+            step in jump_set for step in range(end, stable_end)
+        ):
+            continue
+        if (
+            max(float(translation_steps[step]) for step in cluster)
+            >= persistent_translation
+            or max(float(rotation_steps[step]) for step in cluster)
+            >= persistent_rotation
+        ):
+            result.append(cluster)
+    return result
+
+
 def correct_pose_stream(
     positions: np.ndarray,
     quaternions_xyzw: np.ndarray,
@@ -224,6 +263,43 @@ def correct_pose_stream(
                 "directional_ratio": net_translation / max(path_length, 1e-12),
             }
         )
+    settling_clusters = _settling_jump_clusters(
+        [step for step in jump_steps if step not in consumed],
+        translation_steps,
+        rotation_steps,
+        count=count,
+        persistent_translation=persistent_translation,
+        persistent_rotation=persistent_rotation,
+    )
+    settling_steps = {step for cluster in settling_clusters for step in cluster}
+    consumed.update(settling_steps)
+    for cluster in settling_clusters:
+        events.append(
+            {
+                "type": "settling_coordinate_jump",
+                "frame_start": cluster[0],
+                "frame_end_exclusive": cluster[-1] + 1,
+                "jump_frames": cluster,
+                "maximum_translation_step_m": max(
+                    float(translation_steps[step]) for step in cluster
+                ),
+                "maximum_rotation_step_deg": float(
+                    np.rad2deg(max(rotation_steps[step] for step in cluster))
+                ),
+            }
+        )
+    remaining_steps = [step for step in jump_steps if step not in consumed]
+    confirmed_persistent_instability = any(
+        (
+            translation_steps[index] > persistent_translation
+            or rotation_steps[index] > persistent_rotation
+        )
+        and all(
+            step not in jump_set
+            for step in range(index + 1, min(count, index + 7))
+        )
+        for index in remaining_steps
+    )
     for index in jump_steps:
         if index in consumed:
             continue
@@ -240,7 +316,12 @@ def correct_pose_stream(
         # part of the same instability chain. Trackers commonly recover in
         # several stages, leaving residual steps below the deliberately
         # conservative first-jump threshold.
-        chained_instability = bool(persistent_steps or progressive_clusters)
+        chained_instability = bool(
+            persistent_steps
+            or progressive_clusters
+            or settling_clusters
+            or confirmed_persistent_instability
+        )
         if (
             stable_after
             and (very_large or chained_instability)
@@ -263,7 +344,11 @@ def correct_pose_stream(
     correction = np.eye(4, dtype=np.float64)
     persistent_set = set(persistent_steps)
     for index in range(count):
-        if index in persistent_set or index in progressive_steps:
+        if (
+            index in persistent_set
+            or index in progressive_steps
+            or index in settling_steps
+        ):
             previous = corrected_matrices[index - 1]
             before_previous = corrected_matrices[index - 2]
             previous_motion = np.linalg.inv(before_previous) @ previous
@@ -304,6 +389,8 @@ def correct_pose_stream(
     for index in persistent_steps:
         correction_mask[index:] = True
     for cluster in progressive_clusters:
+        correction_mask[cluster[0] :] = True
+    for cluster in settling_clusters:
         correction_mask[cluster[0] :] = True
     corrected_positions[~pose_valid] = translations[~pose_valid]
     corrected_quaternions[~pose_valid] = quaternions[~pose_valid]

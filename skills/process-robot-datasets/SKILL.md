@@ -126,7 +126,9 @@ Before QR calibration or export, audit global pose continuity:
 
 Use the corrected manifest only when the audit is `PASS`. The command may interpolate paired short
 spikes, stitch a high-confidence persistent coordinate jump and its later stable residual jumps,
-or progressively stitch a short, directional coordinate-drift transition whose cumulative displacement is physically implausible.
+progressively stitch a short, directional coordinate-drift transition whose cumulative displacement is physically implausible,
+or stitch a 2--4-step settling jump followed by stable tracking. A confirmed large coordinate jump
+may also establish the instability chain for independent medium stable jumps earlier in that pose stream.
 Subsequent relative motion remains intact. It writes a new manifest with raw arrays and correction
 masks; ambiguous jumps remain unchanged and force `NEEDS_REVIEW`.
 
