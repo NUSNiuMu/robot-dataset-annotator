@@ -31,8 +31,9 @@ episode 可选的 `context_start_frame` 允许保留正式任务开始前的连�
 `adapters/lerobot_export.py` 是可选依赖边界：它延迟导入 ROS、OpenCV 和 LeRobot，按审核
 时间轴对 MCAP 三路相机做最近邻同步，并只导出 decisions 接受的帧。低维观测来自已同步的
 review manifest，视频来自原始相机消息；动作语义、同步误差、输入哈希和 LeRobot 版本写入
-数据集内的 `rda/export_manifest.json`。导出器当前只接受单 source segment，避免把多个独立
-时间轴静默拼接。
+数据集内的 `rda/export_manifest.json`。视频默认在源消息解码时直接流式送入三路编码器，
+省去逐帧 PNG 暂存；兼容模式仍可使用 PNG 分阶段编码。导出器当前只接受单 source segment，
+避免把多个独立时间轴静默拼接。
 
 头部 review pose 是 tracking frame 的全局 pose。导出器读取 MCAP 的 `tf_static` 和彩色相机
 `CameraInfo`，沿静态坐标树计算 tracking frame 到 RGB 相机的外参，额外输出

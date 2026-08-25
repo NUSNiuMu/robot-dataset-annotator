@@ -529,6 +529,7 @@ def export_insight_lerobot(
     max_skew_ms: float | None = None,
     vcodec: str = "h264",
     head_pose_child_frame: str | None = None,
+    streaming_video_encoding: bool = True,
 ) -> dict[str, Any]:
     if output.exists():
         raise FileExistsError(f"refusing to overwrite dataset: {output}")
@@ -579,8 +580,9 @@ def export_insight_lerobot(
             robot_type="human_hand_tracking",
             features=_features(cameras),
             use_videos=True,
-            image_writer_threads=4,
+            image_writer_threads=0 if streaming_video_encoding else 4,
             vcodec=vcodec,
+            streaming_encoding=streaming_video_encoding,
         )
         images: dict[int, dict[str, np.ndarray]] = {}
         next_to_write = 0
@@ -666,6 +668,9 @@ def export_insight_lerobot(
             "code_revision": current_code_revision(Path.cwd()),
             "repo_id": repo_id,
             "video_codec": vcodec,
+            "video_encoding_mode": (
+                "streaming" if streaming_video_encoding else "staged_png"
+            ),
             "task_id": task.task_id,
             "episodes": validation.episodes,
             "frames": len(plans),

@@ -117,6 +117,9 @@ LeRobot finalization. Its action is the next-frame dual-hand pose in the source 
 provenance must state that it is not robot-retargeted and has no gripper command.
 The export also carries deterministic left/right subtask IDs, task/subtask progress, the original
 head tracking pose, and the head RGB-camera global pose obtained from the recorded static transform.
+Camera frames use direct streaming encoding by default to avoid temporary PNG disk traffic. If a
+runtime encoder is incompatible with streaming, retry explicitly with
+`--video-encoding-mode staged-png` and retain that mode in export provenance.
 
 Validate the completed local dataset in the same pinned environment:
 

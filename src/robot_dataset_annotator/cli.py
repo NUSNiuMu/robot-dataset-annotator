@@ -132,6 +132,7 @@ def _export_lerobot(args: argparse.Namespace) -> int:
         max_skew_ms=args.max_skew_ms,
         vcodec=args.vcodec,
         head_pose_child_frame=args.head_pose_child_frame,
+        streaming_video_encoding=args.video_encoding_mode == "streaming",
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
@@ -255,6 +256,15 @@ def build_parser() -> argparse.ArgumentParser:
     export_lerobot.add_argument("--max-skew-ms", type=float)
     export_lerobot.add_argument(
         "--vcodec", choices=("h264", "hevc", "libsvtav1", "auto"), default="h264"
+    )
+    export_lerobot.add_argument(
+        "--video-encoding-mode",
+        choices=("streaming", "staged-png"),
+        default="streaming",
+        help=(
+            "encode camera frames directly while reading the source (default), "
+            "or stage PNG files before encoding"
+        ),
     )
     export_lerobot.add_argument(
         "--head-pose-child-frame",

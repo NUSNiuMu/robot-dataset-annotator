@@ -109,6 +109,9 @@ MCAP 静态外参后的 9 维头部 RGB 相机全局 pose、有效性掩码、�
 头部 pose 默认按相机名推断对应的 `<name>_camera_imu` tracking frame；设备命名不符合该规则
 时，导出和二维码标定都应显式传入 `--head-pose-child-frame`。
 导出使用同目录临时产物完成后原子改名，拒绝覆盖已有数据集。
+默认使用流式视频编码：相机帧从 MCAP 解码后直接送入三路编码器，避免先写临时 PNG 再
+读回的磁盘往返，并在 `rda/export_manifest.json` 中记录 `video_encoding_mode`。若需要
+诊断编码器兼容问题，可显式传入 `--video-encoding-mode staged-png` 恢复分阶段编码。
 
 在固定 LeRobot 环境中完成内部不变量检查、全部视频逐帧解码、官方 loader 索引和一个
 DataLoader batch：
