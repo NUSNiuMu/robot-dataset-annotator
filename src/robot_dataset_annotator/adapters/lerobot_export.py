@@ -15,6 +15,8 @@ import numpy as np
 from ..core.decisions import validate_decisions
 from ..core.io import read_json, write_json_atomic
 from ..core.task_spec import TaskSpec
+from .insight_frames import head_frame_calibration
+from .pose_coordinates import pose_matrices, pose_state_from_matrices
 
 
 HAND_STATE_NAMES = tuple(
@@ -53,11 +55,18 @@ class FramePlan:
     source_frame: int
     episode_index: int
     atomic_action_index: int
+    left_hand_subtask_index: int
+    right_hand_subtask_index: int
+    task_progress: float
+    left_hand_subtask_progress: float
+    right_hand_subtask_progress: float
     task: str
     state: np.ndarray
     state_valid: np.ndarray
     head_pose: np.ndarray
     head_pose_valid: np.ndarray
+    head_camera_pose_global: np.ndarray
+    head_camera_pose_global_valid: np.ndarray
     action: np.ndarray
     action_valid: np.ndarray
 
@@ -97,7 +106,11 @@ def _rotation_6d(quaternions: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return np.concatenate((matrices[:, :, 0], matrices[:, :, 1]), axis=1), valid
 
 
-def _pose_state(manifest: dict[str, Any], role: str) -> tuple[np.ndarray, np.ndarray]:
+def _pose_state(
+    manifest: dict[str, Any],
+    role: str,
+    pose_from_camera: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
     poses = [pose for pose in manifest.get("poses", []) if pose.get("role") == role]
     if len(poses) != 1:
         raise ValueError(f"expected exactly one {role!r} pose stream")
@@ -114,7 +127,13 @@ def _pose_state(manifest: dict[str, Any], role: str) -> tuple[np.ndarray, np.nda
         raise ValueError(f"{role} validity must have shape ({frame_count},)")
     rotation, rotation_valid = _rotation_6d(quaternions)
     position_valid = stream_valid & np.isfinite(positions).all(axis=1)
-    state = np.concatenate((positions, rotation), axis=1).astype(np.float32)
+    if pose_from_camera is None:
+        state = np.concatenate((positions, rotation), axis=1).astype(np.float32)
+    else:
+        global_from_pose, matrix_valid = pose_matrices(positions, quaternions)
+        global_from_camera = global_from_pose @ pose_from_camera
+        state = pose_state_from_matrices(global_from_camera).astype(np.float32)
+        position_valid &= matrix_valid
     valid = np.concatenate(
         (
             np.repeat(position_valid[:, None], 3, axis=1),
@@ -130,10 +149,15 @@ def build_frame_plan(
     review_manifest: dict[str, Any],
     decisions: dict[str, Any],
     task: TaskSpec,
+    *,
+    head_pose_from_camera: np.ndarray | None = None,
 ) -> list[FramePlan]:
     left, left_valid = _pose_state(review_manifest, "left_hand")
     right, right_valid = _pose_state(review_manifest, "right_hand")
     head, head_valid = _pose_state(review_manifest, "head")
+    head_camera, head_camera_valid = _pose_state(
+        review_manifest, "head", head_pose_from_camera
+    )
     hands = np.concatenate((left, right), axis=1)
     hands_valid = np.concatenate((left_valid, right_valid), axis=1)
 
@@ -150,6 +174,13 @@ def build_frame_plan(
         elif review.get("episode_start_frame") is not None:
             episodes.append(
                 {
+                    "context_start_frame": review.get(
+                        "context_start_frame", review["episode_start_frame"]
+                    ),
+                    "episode_start_frame": review["episode_start_frame"],
+                    "episode_end_frame_exclusive": review[
+                        "episode_end_frame_exclusive"
+                    ],
                     "atomic_boundaries": review.get("atomic_boundaries", []),
                 }
             )
@@ -157,21 +188,62 @@ def build_frame_plan(
     plans: list[FramePlan] = []
     for episode_index, episode in enumerate(episodes):
         boundaries = [int(value) for value in episode["atomic_boundaries"]]
+        episode_start = int(episode.get("episode_start_frame", boundaries[0]))
+        episode_end = int(
+            episode.get("episode_end_frame_exclusive", boundaries[-1])
+        )
+        context_start = int(episode.get("context_start_frame", episode_start))
         episode_plans: list[FramePlan] = []
-        for action_index, action in enumerate(task.actions):
-            for source_frame in range(
-                boundaries[action_index], boundaries[action_index + 1]
-            ):
+
+        ranges: list[tuple[int, Any, int, int]] = []
+        if context_start < episode_start:
+            if task.context_action is None:
+                raise ValueError("context frames require a task context_action")
+            ranges.append((-1, task.context_action, context_start, episode_start))
+        ranges.extend(
+            (
+                action_index,
+                action,
+                boundaries[action_index],
+                boundaries[action_index + 1],
+            )
+            for action_index, action in enumerate(task.actions)
+        )
+        task_denominator = max(1, episode_end - episode_start - 1)
+        for action_index, action, range_start, range_end in ranges:
+            subtask_denominator = max(1, range_end - range_start - 1)
+            for source_frame in range(range_start, range_end):
+                task_progress = (
+                    0.0
+                    if action_index == -1
+                    else (source_frame - episode_start) / task_denominator
+                )
+                subtask_progress = (
+                    0.0
+                    if range_end - range_start == 1
+                    else (source_frame - range_start) / subtask_denominator
+                )
                 episode_plans.append(
                     FramePlan(
                         source_frame=source_frame,
                         episode_index=episode_index,
                         atomic_action_index=action_index,
+                        left_hand_subtask_index=task.subtask_index(
+                            action_index, "left_hand"
+                        ),
+                        right_hand_subtask_index=task.subtask_index(
+                            action_index, "right_hand"
+                        ),
+                        task_progress=float(task_progress),
+                        left_hand_subtask_progress=float(subtask_progress),
+                        right_hand_subtask_progress=float(subtask_progress),
                         task=action.instruction,
                         state=hands[source_frame],
                         state_valid=hands_valid[source_frame],
                         head_pose=head[source_frame],
                         head_pose_valid=head_valid[source_frame],
+                        head_camera_pose_global=head_camera[source_frame],
+                        head_camera_pose_global_valid=head_camera_valid[source_frame],
                         action=np.empty(0, dtype=np.float32),
                         action_valid=np.empty(0, dtype=bool),
                     )
@@ -182,11 +254,18 @@ def build_frame_plan(
                 source_frame=plan.source_frame,
                 episode_index=plan.episode_index,
                 atomic_action_index=plan.atomic_action_index,
+                left_hand_subtask_index=plan.left_hand_subtask_index,
+                right_hand_subtask_index=plan.right_hand_subtask_index,
+                task_progress=plan.task_progress,
+                left_hand_subtask_progress=plan.left_hand_subtask_progress,
+                right_hand_subtask_progress=plan.right_hand_subtask_progress,
                 task=plan.task,
                 state=plan.state,
                 state_valid=plan.state_valid,
                 head_pose=plan.head_pose,
                 head_pose_valid=plan.head_pose_valid,
+                head_camera_pose_global=plan.head_camera_pose_global,
+                head_camera_pose_global_valid=plan.head_camera_pose_global_valid,
                 action=target.state.copy(),
                 action_valid=target.state_valid.copy(),
             )
@@ -368,6 +447,16 @@ def _features(cameras: tuple[CameraSpec, ...]) -> dict[str, dict[str, Any]]:
             "shape": (9,),
             "names": list(HEAD_STATE_NAMES),
         },
+        "observation.head_camera_pose_global": {
+            "dtype": "float32",
+            "shape": (9,),
+            "names": list(HEAD_STATE_NAMES),
+        },
+        "observation.head_camera_pose_global_valid": {
+            "dtype": "uint8",
+            "shape": (9,),
+            "names": list(HEAD_STATE_NAMES),
+        },
         "observation.head_pose_valid": {
             "dtype": "uint8",
             "shape": (9,),
@@ -393,6 +482,31 @@ def _features(cameras: tuple[CameraSpec, ...]) -> dict[str, dict[str, Any]]:
             "shape": (1,),
             "names": ["atomic_action_index"],
         },
+        "annotation.left_hand_subtask_index": {
+            "dtype": "int64",
+            "shape": (1,),
+            "names": ["left_hand_subtask_index"],
+        },
+        "annotation.right_hand_subtask_index": {
+            "dtype": "int64",
+            "shape": (1,),
+            "names": ["right_hand_subtask_index"],
+        },
+        "annotation.task_progress": {
+            "dtype": "float32",
+            "shape": (1,),
+            "names": ["task_progress"],
+        },
+        "annotation.left_hand_subtask_progress": {
+            "dtype": "float32",
+            "shape": (1,),
+            "names": ["left_hand_subtask_progress"],
+        },
+        "annotation.right_hand_subtask_progress": {
+            "dtype": "float32",
+            "shape": (1,),
+            "names": ["right_hand_subtask_progress"],
+        },
     }
     for camera in cameras:
         result[camera.key] = {
@@ -414,6 +528,7 @@ def export_insight_lerobot(
     repo_id: str,
     max_skew_ms: float | None = None,
     vcodec: str = "h264",
+    head_pose_child_frame: str | None = None,
 ) -> dict[str, Any]:
     if output.exists():
         raise FileExistsError(f"refusing to overwrite dataset: {output}")
@@ -424,7 +539,17 @@ def export_insight_lerobot(
     validation = validate_decisions(annotation_manifest, decisions, task)
     if len(annotation_manifest.get("source_segments", [])) != 1:
         raise ValueError("Insight LeRobot export currently requires one source segment")
-    plans = build_frame_plan(review_manifest, decisions, task)
+    head_calibration = head_frame_calibration(
+        source,
+        review_manifest,
+        head_pose_child_frame=head_pose_child_frame,
+    )
+    plans = build_frame_plan(
+        review_manifest,
+        decisions,
+        task,
+        head_pose_from_camera=head_calibration["tracking_from_camera"],
+    )
     cameras = _camera_specs(review_manifest)
     fps = float(review_manifest["fps"])
     if fps <= 0:
@@ -471,6 +596,12 @@ def export_insight_lerobot(
                     "observation.state": plan.state,
                     "observation.state_valid": plan.state_valid.astype(np.uint8),
                     "observation.head_pose": plan.head_pose,
+                    "observation.head_camera_pose_global": (
+                        plan.head_camera_pose_global
+                    ),
+                    "observation.head_camera_pose_global_valid": (
+                        plan.head_camera_pose_global_valid.astype(np.uint8)
+                    ),
                     "observation.head_pose_valid": plan.head_pose_valid.astype(
                         np.uint8
                     ),
@@ -481,6 +612,21 @@ def export_insight_lerobot(
                     ),
                     "annotation.atomic_action_index": np.asarray(
                         [plan.atomic_action_index], dtype=np.int64
+                    ),
+                    "annotation.left_hand_subtask_index": np.asarray(
+                        [plan.left_hand_subtask_index], dtype=np.int64
+                    ),
+                    "annotation.right_hand_subtask_index": np.asarray(
+                        [plan.right_hand_subtask_index], dtype=np.int64
+                    ),
+                    "annotation.task_progress": np.asarray(
+                        [plan.task_progress], dtype=np.float32
+                    ),
+                    "annotation.left_hand_subtask_progress": np.asarray(
+                        [plan.left_hand_subtask_progress], dtype=np.float32
+                    ),
+                    "annotation.right_hand_subtask_progress": np.asarray(
+                        [plan.right_hand_subtask_progress], dtype=np.float32
                     ),
                     "task": plan.task,
                     **images.pop(next_to_write),
@@ -511,6 +657,7 @@ def export_insight_lerobot(
             action.key: sum(plan.atomic_action_index == index for plan in plans)
             for index, action in enumerate(task.actions)
         }
+        context_frames = sum(plan.atomic_action_index == -1 for plan in plans)
         export_manifest = {
             "schema_version": 1,
             "status": "PASS",
@@ -525,12 +672,50 @@ def export_insight_lerobot(
             "fps": fps,
             "duration_s": len(plans) / fps,
             "atomic_action_frames": action_counts,
+            "context_frames": context_frames,
+            "subtask_semantics": task.subtask_catalog(),
             "camera_synchronization": synchronization,
             "action_semantics": (
                 "Next-frame dual-hand 6D pose target in the source tracking frame; "
                 "the final frame repeats the current target. Not robot-retargeted and "
                 "contains no gripper command."
             ),
+            "pose_semantics": {
+                "observation.state": (
+                    "Left- and right-hand global poses from the synchronized "
+                    "review manifest."
+                ),
+                "observation.head_pose": (
+                    "Head tracking-frame global pose from the synchronized review "
+                    "manifest."
+                ),
+                "observation.head_camera_pose_global": (
+                    "Head RGB-camera global pose after applying the recorded static "
+                    "tracking-to-camera transform."
+                ),
+            },
+            "head_camera_frames": {
+                "global_frame": head_calibration["global_frame"],
+                "head_pose_child_frame": head_calibration[
+                    "head_pose_child_frame"
+                ],
+                "head_camera_frame": head_calibration["camera_frame"],
+                "head_pose_from_camera": head_calibration[
+                    "tracking_from_camera"
+                ].tolist(),
+            },
+            "progress_semantics": {
+                "annotation.task_progress": (
+                    "Zero during preserved context; linear from 0 to 1 across the "
+                    "reviewed manipulation interval."
+                ),
+                "annotation.left_hand_subtask_progress": (
+                    "Linear from 0 to 1 inside the current left-hand subtask."
+                ),
+                "annotation.right_hand_subtask_progress": (
+                    "Linear from 0 to 1 inside the current right-hand subtask."
+                ),
+            },
             "source": {
                 "bag": source.name,
                 "review_manifest_sha256": _sha256(review_manifest_path),

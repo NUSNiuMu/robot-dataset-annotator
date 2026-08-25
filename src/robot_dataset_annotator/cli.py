@@ -90,6 +90,10 @@ def _built_in_task(args: argparse.Namespace) -> int:
 
 def _suggest(args: argparse.Namespace) -> int:
     task = TaskSpec.load(args.task_spec)
+    if task.plugin is None:
+        raise SystemExit(
+            f"task {task.task_id} requires manual boundaries and has no suggester"
+        )
     if args.format == "npz":
         with np.load(args.observations) as payload:
             observations = np.asarray(payload["state"], dtype=np.float64)
@@ -127,6 +131,25 @@ def _export_lerobot(args: argparse.Namespace) -> int:
         repo_id=args.repo_id,
         max_skew_ms=args.max_skew_ms,
         vcodec=args.vcodec,
+        head_pose_child_frame=args.head_pose_child_frame,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _calibrate_qr(args: argparse.Namespace) -> int:
+    from .adapters.qr_calibration import estimate_qr_transform
+
+    result = estimate_qr_transform(
+        source=args.source.expanduser().resolve(),
+        review_manifest_path=args.review_manifest.expanduser().resolve(),
+        output=args.output.expanduser().resolve(),
+        marker_size_m=args.marker_size_m,
+        frame_start=args.frame_start,
+        frame_end_exclusive=args.frame_end_exclusive,
+        head_pose_child_frame=args.head_pose_child_frame,
+        minimum_detections=args.minimum_detections,
+        maximum_reprojection_error_px=args.maximum_reprojection_error_px,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
@@ -233,7 +256,27 @@ def build_parser() -> argparse.ArgumentParser:
     export_lerobot.add_argument(
         "--vcodec", choices=("h264", "hevc", "libsvtav1", "auto"), default="h264"
     )
+    export_lerobot.add_argument(
+        "--head-pose-child-frame",
+        help="tracking child frame represented by the head pose topic",
+    )
     export_lerobot.set_defaults(handler=_export_lerobot)
+
+    calibrate_qr = commands.add_parser(
+        "calibrate-qr", help="estimate the global QR pose from preserved head frames"
+    )
+    calibrate_qr.add_argument("--source", type=Path, required=True)
+    calibrate_qr.add_argument("--review-manifest", type=Path, required=True)
+    calibrate_qr.add_argument("--output", type=Path, required=True)
+    calibrate_qr.add_argument("--marker-size-m", type=float, required=True)
+    calibrate_qr.add_argument("--frame-start", type=int, default=0)
+    calibrate_qr.add_argument("--frame-end-exclusive", type=int, required=True)
+    calibrate_qr.add_argument("--head-pose-child-frame")
+    calibrate_qr.add_argument("--minimum-detections", type=int, default=3)
+    calibrate_qr.add_argument(
+        "--maximum-reprojection-error-px", type=float, default=3.0
+    )
+    calibrate_qr.set_defaults(handler=_calibrate_qr)
 
     validate_lerobot = commands.add_parser(
         "validate-lerobot", help="validate a local LeRobotDataset v3 export"

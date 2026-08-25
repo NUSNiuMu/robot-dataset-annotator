@@ -18,6 +18,11 @@ DISCOVERED
 停顿片段中的多次完整操作。每个 episode 的语义边界必须单调、覆盖完整区间，并满足任务配置
 规定的最短模型上下文。
 
+episode 可选的 `context_start_frame` 允许保留正式任务开始前的连续上下文，且必须满足
+`context_start_frame <= episode_start_frame`。旧 decisions 缺少该字段时视为两者相等。
+任务配置只有定义 `context_action` 才能接受上下文帧。上下文使用原子动作索引 `-1`，不会
+改变原有动作边界；左右手 subtask ID 使用独立的全局编号，逐帧进度由导出器确定性生成。
+
 任务插件只负责从规范化观测提出候选边界。候选是审核提示，不可替代人工视觉结论。数据源
 适配器负责把原始数据变成规范化观测；导出适配器负责生成训练格式并写验收证据。
 插件可以返回单个候选，也可以返回同一源片段中的多个有序 episode 候选；core decisions
@@ -28,6 +33,15 @@ DISCOVERED
 review manifest，视频来自原始相机消息；动作语义、同步误差、输入哈希和 LeRobot 版本写入
 数据集内的 `rda/export_manifest.json`。导出器当前只接受单 source segment，避免把多个独立
 时间轴静默拼接。
+
+头部 review pose 是 tracking frame 的全局 pose。导出器读取 MCAP 的 `tf_static` 和彩色相机
+`CameraInfo`，沿静态坐标树计算 tracking frame 到 RGB 相机的外参，额外输出
+`observation.head_camera_pose_global` 及其有效性掩码。原有 `observation.head_pose` 保留，
+避免静默改变旧字段语义。
+
+`adapters/qr_calibration.py` 只负责标定元数据：从明确保留的头部上下文帧检测二维码，使用
+已确认的实物边长和相机内参求解 PnP，再结合头部全局 pose 与静态外参得到
+`global_from_qr`。结果和逆矩阵写入独立 JSON；它不变换或覆盖数据集中的任何相机 pose。
 
 `adapters/lerobot_validation.py` 先直接检查 Parquet 的 row、episode、timestamp、source
 frame、原子动作、有效性和 next-frame action 不变量，再完整解码每一个视频文件。随后用

@@ -1,9 +1,10 @@
 # Task extension
 
-Add a task spec containing a stable task ID, ordered atomic actions, language instructions, minimum
-model context, and a plugin import path. Implement the plugin under `tasks/<task>/`; accept
-normalized observations and return either a candidate with boundaries and evidence or an explicit
-unresolved reason.
+Add a task spec containing a stable task ID, ordered atomic actions, language instructions, and
+minimum model context. Add a plugin import path only when a reliable candidate algorithm exists.
+Implement automatic plugins under `tasks/<task>/`; accept normalized observations and return either
+a candidate with boundaries and evidence or an explicit unresolved reason. Tasks without a plugin
+must be segmented by exhaustive manual review.
 
 Do not import ROS, a capture dashboard, or a training library from task code. Put raw-data parsing
 in `adapters/` and final dataset writing in a separate export adapter.

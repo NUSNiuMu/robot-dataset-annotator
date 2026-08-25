@@ -69,6 +69,9 @@ def _normalize_episodes(review: dict[str, Any]) -> list[dict[str, Any]]:
         return []
     return [
         {
+            "context_start_frame": review.get(
+                "context_start_frame", review["episode_start_frame"]
+            ),
             "episode_start_frame": review["episode_start_frame"],
             "episode_end_frame_exclusive": review["episode_end_frame_exclusive"],
             "atomic_boundaries": review.get("atomic_boundaries", []),
@@ -102,16 +105,29 @@ def validate_decisions(
                 raise ValueError(f"segment {index}: PASS requires at least one episode")
             previous_end = -1
             for episode_index, episode in enumerate(episodes):
+                context_start = int(
+                    episode.get("context_start_frame", episode["episode_start_frame"])
+                )
                 start = int(episode["episode_start_frame"])
                 end = int(episode["episode_end_frame_exclusive"])
                 boundaries = [int(value) for value in episode["atomic_boundaries"]]
-                if start < 0 or end > segments[index] or end <= start:
+                if (
+                    context_start < 0
+                    or context_start > start
+                    or end > segments[index]
+                    or end <= start
+                ):
                     raise ValueError(
                         f"segment {index} episode {episode_index}: invalid frame range"
                     )
-                if start < previous_end:
+                if context_start < previous_end:
                     raise ValueError(
                         f"segment {index}: episode ranges overlap or are unsorted"
+                    )
+                if context_start < start and task.context_action is None:
+                    raise ValueError(
+                        f"segment {index} episode {episode_index}: "
+                        "context frames require a task context_action"
                     )
                 if len(boundaries) != len(task.actions) + 1:
                     raise ValueError(

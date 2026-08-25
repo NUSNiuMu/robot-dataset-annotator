@@ -21,8 +21,9 @@ git log origin/main..HEAD --oneline
 - `tasks/` 只包含任务语义和候选边界算法。无法可靠判断时返回 `unresolved`，不能伪造
   边界或自动丢弃源数据。
 - `adapters/` 隔离 rosbag、Insight、LeRobot 等外部格式与可选依赖。
-- `task_specs/` 定义稳定 task ID、原子动作、最短帧数和插件入口。
+- `task_specs/` 定义稳定 task ID、原子动作、最短帧数和可选插件入口。
 - 自动结果只是人工审核提示；除非另有批准，所有源片段和必需视角都要穷尽审核。
+- 二维码标定上下文必须用独立 context 边界保留；全局变换写入 JSON，不得静默改写源 pose。
 - LeRobot 工作数据集保留 `rda/` 验证证据；严格交付副本只复制 schema 实际引用的官方
   数据目录。仅在确认根目录 `images/` 不含文件时，才可省略官方写入器遗留的空目录骨架。
 

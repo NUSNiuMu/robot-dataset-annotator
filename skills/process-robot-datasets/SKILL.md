@@ -66,11 +66,18 @@ Read [references/review-standard.md](references/review-standard.md) before writi
 - Record exactly one PASS or FAIL conclusion per source segment.
 - Allow multiple non-overlapping episodes inside one PASS source segment.
 - Require monotonically increasing task boundaries and the configured minimum frames per action.
+- When QR calibration context must survive segmentation, set `context_start_frame` before
+  `episode_start_frame`; never move the manipulation boundary backward to absorb calibration.
 
-For an Insight synchronized review manifest, run a task suggester without first producing parquet:
+For a task that defines a suggester, an Insight synchronized review manifest can be used without
+first producing parquet:
 
     rda suggest --task-spec <task.json> --observations <review-manifest.json> \
       --format insight-review
+
+`cup-pick-place` intentionally has no automatic splitter. Review it manually, keep the QR calibration
+prefix with `context_start_frame`, and record all four manipulation boundaries in original
+source-frame coordinates.
 
 The adapter exposes synchronized hand poses and marks absent gripper-width fields invalid. A task
 plugin may return multiple ordered candidates in `episodes`; confirm each one against all views.
@@ -85,6 +92,17 @@ Validate before an expensive export:
     rda validate-decisions --manifest <manifest.json> \
       --decisions <decisions.json> --task-spec <task.json>
 
+For a task with preserved QR context, measure the printed black-square edge and estimate the QR
+pose in the global tracking frame before export:
+
+    rda calibrate-qr --source <recording-dir> \
+      --review-manifest <review-dir>/manifest.json --marker-size-m <meters> \
+      --frame-start <context-start> --frame-end-exclusive <episode-start> \
+      --output <review-dir>/qr_transform.json
+
+The JSON stores `global_from_qr` and `qr_from_global`. It is calibration evidence only: do not
+rewrite camera poses or discard the source context after producing it.
+
 For a reviewed single-segment Insight MCAP, export three source camera streams and synchronized
 poses to LeRobotDataset v3.0 with explicit paths:
 
@@ -97,6 +115,8 @@ poses to LeRobotDataset v3.0 with explicit paths:
 The adapter refuses an existing output and atomically promotes a temporary directory only after
 LeRobot finalization. Its action is the next-frame dual-hand pose in the source tracking frame;
 provenance must state that it is not robot-retargeted and has no gripper command.
+The export also carries deterministic left/right subtask IDs, task/subtask progress, the original
+head tracking pose, and the head RGB-camera global pose obtained from the recorded static transform.
 
 Validate the completed local dataset in the same pinned environment:
 

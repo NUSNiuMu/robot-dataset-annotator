@@ -25,7 +25,10 @@ def _column(table: Any, name: str, dtype: Any) -> np.ndarray:
 
 
 def _validate_low_dimensional_data(
-    table: Any, episodes: list[dict[str, Any]], fps: float
+    table: Any,
+    episodes: list[dict[str, Any]],
+    fps: float,
+    export: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     row_count = len(table)
     index = _column(table, "index", np.int64)
@@ -41,6 +44,49 @@ def _validate_low_dimensional_data(
     head_valid = _column(table, "observation.head_pose_valid", np.uint8)
     action = _column(table, "action", np.float32)
     action_valid = _column(table, "action_is_valid", np.uint8)
+    has_subtasks = "annotation.left_hand_subtask_index" in table.column_names
+    subtask_columns = {
+        "annotation.left_hand_subtask_index",
+        "annotation.right_hand_subtask_index",
+        "annotation.task_progress",
+        "annotation.left_hand_subtask_progress",
+        "annotation.right_hand_subtask_progress",
+    }
+    if has_subtasks and not subtask_columns.issubset(table.column_names):
+        raise ValueError("dataset contains an incomplete subtask annotation schema")
+    if not has_subtasks and subtask_columns.intersection(table.column_names):
+        raise ValueError("dataset contains an incomplete subtask annotation schema")
+    head_camera_global = head_camera_global_valid = None
+    has_head_camera_global = (
+        "observation.head_camera_pose_global" in table.column_names
+    )
+    if has_head_camera_global:
+        head_camera_global = _column(
+            table, "observation.head_camera_pose_global", np.float32
+        )
+        head_camera_global_valid = _column(
+            table, "observation.head_camera_pose_global_valid", np.uint8
+        )
+    elif "observation.head_camera_pose_global_valid" in table.column_names:
+        raise ValueError(
+            "dataset contains an incomplete global head-camera pose schema"
+        )
+    if has_subtasks:
+        left_subtasks = _column(
+            table, "annotation.left_hand_subtask_index", np.int64
+        ).reshape(-1)
+        right_subtasks = _column(
+            table, "annotation.right_hand_subtask_index", np.int64
+        ).reshape(-1)
+        task_progress = _column(
+            table, "annotation.task_progress", np.float32
+        ).reshape(-1)
+        left_subtask_progress = _column(
+            table, "annotation.left_hand_subtask_progress", np.float32
+        ).reshape(-1)
+        right_subtask_progress = _column(
+            table, "annotation.right_hand_subtask_progress", np.float32
+        ).reshape(-1)
 
     if not np.array_equal(index, np.arange(row_count)):
         raise ValueError("global dataset index is not contiguous")
@@ -48,11 +94,22 @@ def _validate_low_dimensional_data(
         raise ValueError("state and action must both have shape Nx18")
     if head.shape != (row_count, 9):
         raise ValueError("head pose must have shape Nx9")
-    for values, valid, label in (
+    if head_camera_global is not None and head_camera_global.shape != (row_count, 9):
+        raise ValueError("global head-camera pose must have shape Nx9")
+    pose_and_action_columns = [
         (state, state_valid, "state"),
         (head, head_valid, "head pose"),
         (action, action_valid, "action"),
-    ):
+    ]
+    if head_camera_global is not None:
+        pose_and_action_columns.append(
+            (
+                head_camera_global,
+                head_camera_global_valid,
+                "global head-camera pose",
+            )
+        )
+    for values, valid, label in pose_and_action_columns:
         if values.shape != valid.shape:
             raise ValueError(f"{label} validity shape does not match values")
         if not np.isin(valid, (0, 1)).all():
@@ -65,6 +122,16 @@ def _validate_low_dimensional_data(
     if sum(int(row["length"]) for row in episodes) != row_count:
         raise ValueError("episode lengths do not sum to the dataset row count")
     action_to_task: dict[int, int] = {}
+    action_count = (
+        len(export.get("atomic_action_frames", {}))
+        if export is not None
+        else len(set(int(value) for value in atomic_actions if value >= 0))
+    )
+    expected_actions = np.arange(action_count, dtype=np.int64)
+    subtask_catalog = {
+        (int(row["atomic_action_index"]), str(row["hand"])): int(row["index"])
+        for row in (export or {}).get("subtask_semantics", [])
+    }
     for expected_episode, metadata in enumerate(episodes):
         start = int(metadata["dataset_from_index"])
         end = int(metadata["dataset_to_index"])
@@ -88,15 +155,18 @@ def _validate_low_dimensional_data(
                 f"episode {expected_episode} source frames are not contiguous"
             )
         episode_actions = atomic_actions[selection]
-        if not np.isin(episode_actions, (0, 1)).all():
+        allowed_actions = np.concatenate((np.asarray([-1]), expected_actions))
+        if not np.isin(episode_actions, allowed_actions).all():
             raise ValueError(f"episode {expected_episode} has an unknown atomic action")
-        if not np.array_equal(np.unique(episode_actions), np.asarray([0, 1])):
+        if not np.array_equal(
+            np.unique(episode_actions[episode_actions >= 0]), expected_actions
+        ):
             raise ValueError(
-                f"episode {expected_episode} does not contain both actions"
+                f"episode {expected_episode} does not contain every atomic action"
             )
         if np.any(np.diff(episode_actions) < 0):
             raise ValueError(f"episode {expected_episode} action order regresses")
-        for atomic_action in (0, 1):
+        for atomic_action in np.unique(episode_actions):
             matched_tasks = np.unique(
                 task_indices[selection][episode_actions == atomic_action]
             )
@@ -110,6 +180,69 @@ def _validate_low_dimensional_data(
                 raise ValueError(
                     f"atomic action {atomic_action} changes task index across episodes"
                 )
+        if has_subtasks:
+            episode_task_progress = task_progress[selection]
+            episode_left_progress = left_subtask_progress[selection]
+            episode_right_progress = right_subtask_progress[selection]
+            for progress, label in (
+                (episode_task_progress, "task"),
+                (episode_left_progress, "left-hand subtask"),
+                (episode_right_progress, "right-hand subtask"),
+            ):
+                if not np.isfinite(progress).all() or np.any(
+                    (progress < 0.0) | (progress > 1.0)
+                ):
+                    raise ValueError(
+                        f"episode {expected_episode} has invalid {label} progress"
+                    )
+            if np.any(np.diff(episode_task_progress) < -1e-6):
+                raise ValueError(f"episode {expected_episode} task progress regresses")
+            context = episode_actions == -1
+            if np.any(episode_task_progress[context] != 0.0):
+                raise ValueError(
+                    f"episode {expected_episode} context task progress is not zero"
+                )
+            manipulation_progress = episode_task_progress[~context]
+            expected_progress = np.linspace(
+                0.0, 1.0, len(manipulation_progress), dtype=np.float32
+            )
+            if not np.allclose(manipulation_progress, expected_progress, atol=1e-6):
+                raise ValueError(
+                    f"episode {expected_episode} task progress is not linear"
+                )
+            episode_left_subtasks = left_subtasks[selection]
+            episode_right_subtasks = right_subtasks[selection]
+            for action_index in np.unique(episode_actions):
+                matched = episode_actions == action_index
+                for hand, values, progress in (
+                    (
+                        "left_hand",
+                        episode_left_subtasks,
+                        episode_left_progress,
+                    ),
+                    (
+                        "right_hand",
+                        episode_right_subtasks,
+                        episode_right_progress,
+                    ),
+                ):
+                    expected_subtask = subtask_catalog.get((int(action_index), hand))
+                    if expected_subtask is None or not np.all(
+                        values[matched] == expected_subtask
+                    ):
+                        raise ValueError(
+                            f"episode {expected_episode} has invalid {hand} subtask"
+                        )
+                    expected_subtask_progress = np.linspace(
+                        0.0, 1.0, int(np.count_nonzero(matched)), dtype=np.float32
+                    )
+                    if not np.allclose(
+                        progress[matched], expected_subtask_progress, atol=1e-6
+                    ):
+                        raise ValueError(
+                            f"episode {expected_episode} has invalid {hand} "
+                            "subtask progress"
+                        )
         episode_state = state[selection]
         episode_valid = state_valid[selection]
         episode_action = action[selection]
@@ -127,9 +260,9 @@ def _validate_low_dimensional_data(
                 f"episode {expected_episode} final action validity is invalid"
             )
 
-    if len(set(action_to_task.values())) != 2:
+    if len(set(action_to_task.values())) != len(action_to_task):
         raise ValueError("atomic actions do not map to distinct tasks")
-    return {
+    result = {
         "rows": row_count,
         "episodes": len(episodes),
         "state_shape": [row_count, 18],
@@ -143,6 +276,12 @@ def _validate_low_dimensional_data(
         "next_frame_action_semantics": "PASS",
         "validity_masks": "PASS",
     }
+    if head_camera_global is not None:
+        result["head_camera_global_pose"] = "PASS"
+    if has_subtasks:
+        result["subtask_semantics"] = "PASS"
+        result["task_and_subtask_progress"] = "PASS"
+    return result
 
 
 def _decode_videos(
@@ -221,7 +360,7 @@ def validate_lerobot_dataset(root: Path) -> dict[str, Any]:
     if len(episodes) != expected_episodes:
         raise ValueError("episode metadata row count is incorrect")
     low_dimensional = _validate_low_dimensional_data(
-        table, episodes, float(info["fps"])
+        table, episodes, float(info["fps"]), export
     )
 
     video_features = {
