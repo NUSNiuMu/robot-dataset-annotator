@@ -75,6 +75,11 @@ NPZ 输入包含 `state` 和 `state_valid`；Insight review parquet 可改用
   --output recording/review/qr_transform.json
 ```
 
+若桌面标记实际为 ArUco，可显式指定类型、字典和 ID，例如
+`--marker-type aruco --aruco-dictionary DICT_4X4_50 --aruco-marker-id 4`。普通 QR 仍是
+默认检测方式。两种方式都使用打印图案黑色方块的实测边长，并在标定 JSON 中记录检测器
+配置。
+
 输出 JSON 保存 `global_from_qr`、`qr_from_global`、参与估计的源帧、重投影误差、坐标系名称、
 二维码尺寸和输入哈希。工具不修改三路相机 pose，也不自动把训练数据转换到二维码坐标系；
 后续使用者可按 JSON 中的矩阵自行变换。二维码坐标原点位于图案中心，X 指向图案右侧，Y

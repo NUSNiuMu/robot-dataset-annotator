@@ -40,7 +40,8 @@ review manifest，视频来自原始相机消息；动作语义、同步误差�
 `observation.head_camera_pose_global` 及其有效性掩码。原有 `observation.head_pose` 保留，
 避免静默改变旧字段语义。
 
-`adapters/qr_calibration.py` 只负责标定元数据：从明确保留的头部上下文帧检测二维码，使用
+`adapters/qr_calibration.py` 只负责标定元数据：从明确保留的头部上下文帧检测普通 QR 或
+指定字典与 ID 的 ArUco 方形标记，使用
 已确认的实物边长和相机内参求解 PnP，再结合头部全局 pose 与静态外参得到
 `global_from_qr`。结果和逆矩阵写入独立 JSON；它不变换或覆盖数据集中的任何相机 pose。
 

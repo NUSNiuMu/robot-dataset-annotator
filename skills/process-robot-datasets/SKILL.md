@@ -100,6 +100,9 @@ pose in the global tracking frame before export:
       --frame-start <context-start> --frame-end-exclusive <episode-start> \
       --output <review-dir>/qr_transform.json
 
+When the printed square is ArUco rather than a standard QR code, add
+`--marker-type aruco --aruco-dictionary <dictionary> --aruco-marker-id <id>`.
+
 The JSON stores `global_from_qr` and `qr_from_global`. It is calibration evidence only: do not
 rewrite camera poses or discard the source context after producing it.
 

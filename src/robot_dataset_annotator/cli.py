@@ -151,6 +151,9 @@ def _calibrate_qr(args: argparse.Namespace) -> int:
         head_pose_child_frame=args.head_pose_child_frame,
         minimum_detections=args.minimum_detections,
         maximum_reprojection_error_px=args.maximum_reprojection_error_px,
+        marker_type=args.marker_type,
+        aruco_dictionary=args.aruco_dictionary,
+        aruco_marker_id=args.aruco_marker_id,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
@@ -279,6 +282,11 @@ def build_parser() -> argparse.ArgumentParser:
     calibrate_qr.add_argument("--review-manifest", type=Path, required=True)
     calibrate_qr.add_argument("--output", type=Path, required=True)
     calibrate_qr.add_argument("--marker-size-m", type=float, required=True)
+    calibrate_qr.add_argument(
+        "--marker-type", choices=("qr_code", "aruco"), default="qr_code"
+    )
+    calibrate_qr.add_argument("--aruco-dictionary", default="DICT_4X4_50")
+    calibrate_qr.add_argument("--aruco-marker-id", type=int)
     calibrate_qr.add_argument("--frame-start", type=int, default=0)
     calibrate_qr.add_argument("--frame-end-exclusive", type=int, required=True)
     calibrate_qr.add_argument("--head-pose-child-frame")

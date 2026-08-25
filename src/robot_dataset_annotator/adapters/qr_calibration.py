@@ -81,6 +81,63 @@ def _average_rigid_transforms(matrices: list[np.ndarray]) -> np.ndarray:
     return result
 
 
+def _marker_corner_detector(
+    cv2: Any,
+    *,
+    marker_type: str,
+    aruco_dictionary: str,
+    aruco_marker_id: int | None,
+):
+    if marker_type == "qr_code":
+        detector = cv2.QRCodeDetector()
+
+        def detect_qr(image: np.ndarray) -> np.ndarray | None:
+            detected, points = detector.detect(image)
+            if not detected or points is None:
+                return None
+            return np.asarray(points, dtype=np.float64).reshape(4, 2)
+
+        return detect_qr
+    if marker_type != "aruco":
+        raise ValueError(f"unsupported marker_type: {marker_type}")
+    if not hasattr(cv2, "aruco"):
+        raise RuntimeError("OpenCV ArUco support is required for ArUco calibration")
+    dictionary_id = getattr(cv2.aruco, aruco_dictionary, None)
+    if dictionary_id is None:
+        raise ValueError(f"unknown ArUco dictionary: {aruco_dictionary}")
+    dictionary = cv2.aruco.getPredefinedDictionary(dictionary_id)
+    parameters = (
+        cv2.aruco.DetectorParameters()
+        if hasattr(cv2.aruco, "DetectorParameters")
+        else cv2.aruco.DetectorParameters_create()
+    )
+    detector = (
+        cv2.aruco.ArucoDetector(dictionary, parameters)
+        if hasattr(cv2.aruco, "ArucoDetector")
+        else None
+    )
+
+    def detect_aruco(image: np.ndarray) -> np.ndarray | None:
+        if detector is None:  # pragma: no cover - OpenCV before 4.7
+            corners, ids, _ = cv2.aruco.detectMarkers(
+                image, dictionary, parameters=parameters
+            )
+        else:
+            corners, ids, _ = detector.detectMarkers(image)
+        if ids is None:
+            return None
+        flat_ids = np.asarray(ids, dtype=np.int64).reshape(-1)
+        if aruco_marker_id is None:
+            matches = np.arange(len(flat_ids)) if len(flat_ids) == 1 else []
+        else:
+            matches = np.flatnonzero(flat_ids == aruco_marker_id)
+        if len(matches) != 1:
+            return None
+        return np.asarray(corners[int(matches[0])], dtype=np.float64).reshape(4, 2)
+
+    return detect_aruco
+
+
 def estimate_qr_transform(
     *,
     source: Path,
@@ -92,6 +149,9 @@ def estimate_qr_transform(
     head_pose_child_frame: str | None = None,
     minimum_detections: int = 3,
     maximum_reprojection_error_px: float = 3.0,
+    marker_type: str = "qr_code",
+    aruco_dictionary: str = "DICT_4X4_50",
+    aruco_marker_id: int | None = None,
 ) -> dict[str, Any]:
     if output.exists():
         raise FileExistsError(f"refusing to overwrite QR transform: {output}")
@@ -138,7 +198,12 @@ def estimate_qr_transform(
         ],
         dtype=np.float64,
     )
-    detector = cv2.QRCodeDetector()
+    detect_marker = _marker_corner_detector(
+        cv2,
+        marker_type=marker_type,
+        aruco_dictionary=aruco_dictionary,
+        aruco_marker_id=aruco_marker_id,
+    )
     estimates: list[np.ndarray] = []
     accepted_frames: list[int] = []
     reprojection_errors: list[float] = []
@@ -147,10 +212,9 @@ def estimate_qr_transform(
         source_frame = frame_start + index
         if not pose_valid[source_frame]:
             return
-        detected, points = detector.detect(image)
-        if not detected or points is None:
+        image_points = detect_marker(image)
+        if image_points is None:
             return
-        image_points = np.asarray(points, dtype=np.float64).reshape(4, 2)
         height, width = image.shape[:2]
         if np.any(image_points[:, 0] <= 1.0) or np.any(
             image_points[:, 0] >= width - 2.0
@@ -214,12 +278,13 @@ def estimate_qr_transform(
     )
     if len(estimates) < minimum_detections:
         raise ValueError(
-            f"only {len(estimates)} valid QR detections; require {minimum_detections}"
+            f"only {len(estimates)} valid marker detections; require "
+            f"{minimum_detections}"
         )
     inlier_indices = _transform_inlier_indices(estimates)
     if len(inlier_indices) < minimum_detections:
         raise ValueError(
-            f"only {len(inlier_indices)} QR transform inliers after rejecting "
+            f"only {len(inlier_indices)} marker transform inliers after rejecting "
             f"{len(estimates) - len(inlier_indices)} outliers; require "
             f"{minimum_detections}"
         )
@@ -232,10 +297,10 @@ def estimate_qr_transform(
     translations = np.asarray([matrix[:3, 3] for matrix in inlier_estimates])
     payload = {
         "schema_version": 1,
-        "marker_type": "qr_code",
+        "marker_type": marker_type,
         "marker_size_m": marker_size_m,
         "coordinate_convention": (
-            "QR origin at marker center; +X toward its right edge, +Y toward its "
+            "Marker origin at its center; +X toward its right edge, +Y toward its "
             "top edge, and +Z outward from the printed face."
         ),
         "global_frame": ros["global_frame"],
@@ -263,5 +328,10 @@ def estimate_qr_transform(
             "head_pose_topic": pose_topic,
         },
     }
+    if marker_type == "aruco":
+        payload["aruco"] = {
+            "dictionary": aruco_dictionary,
+            "marker_id": aruco_marker_id,
+        }
     write_json_atomic(output, payload)
     return payload
