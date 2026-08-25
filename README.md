@@ -141,8 +141,10 @@ MCAP 静态外参后的 9 维头部 RGB 相机全局 pose、有效性掩码、�
 时，导出和二维码标定都应显式传入 `--head-pose-child-frame`。
 导出使用同目录临时产物完成后原子改名，拒绝覆盖已有数据集。
 默认使用流式视频编码：相机帧从 MCAP 解码后直接送入三路编码器，避免先写临时 PNG 再
-读回的磁盘往返，并在 `rda/export_manifest.json` 中记录 `video_encoding_mode`。若需要
-诊断编码器兼容问题，可显式传入 `--video-encoding-mode staged-png` 恢复分阶段编码。
+读回的磁盘往返，并在 `rda/export_manifest.json` 中记录 `video_encoding_mode`。每路编码器
+默认使用 256 帧的有界队列，吸收头部高清流的短时编码积压；可用
+`--encoder-queue-maxsize` 调整，实际值也会写入导出清单。若需要诊断编码器兼容问题，可
+显式传入 `--video-encoding-mode staged-png` 恢复分阶段编码。
 
 在固定 LeRobot 环境中完成内部不变量检查、全部视频逐帧解码、官方 loader 索引和一个
 DataLoader batch：

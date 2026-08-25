@@ -133,6 +133,7 @@ def _export_lerobot(args: argparse.Namespace) -> int:
         vcodec=args.vcodec,
         head_pose_child_frame=args.head_pose_child_frame,
         streaming_video_encoding=args.video_encoding_mode == "streaming",
+        encoder_queue_maxsize=args.encoder_queue_maxsize,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
@@ -281,6 +282,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "encode camera frames directly while reading the source (default), "
             "or stage PNG files before encoding"
+        ),
+    )
+    export_lerobot.add_argument(
+        "--encoder-queue-maxsize",
+        type=int,
+        default=256,
+        help=(
+            "maximum queued frames per streaming video encoder (default: 256); "
+            "increase only when the encoder cannot keep up with source decoding"
         ),
     )
     export_lerobot.add_argument(

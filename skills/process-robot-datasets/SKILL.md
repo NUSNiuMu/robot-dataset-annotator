@@ -137,8 +137,10 @@ provenance must state that it is not robot-retargeted and has no gripper command
 The export also carries deterministic left/right subtask IDs, task/subtask progress, the original
 head tracking pose, and the head RGB-camera global pose obtained from the recorded static transform.
 Camera frames use direct streaming encoding by default to avoid temporary PNG disk traffic. If a
-runtime encoder is incompatible with streaming, retry explicitly with
-`--video-encoding-mode staged-png` and retain that mode in export provenance.
+runtime encoder falls briefly behind source decoding, keep the bounded encoder queue large enough
+to avoid frame loss; the default is 256 frames per camera and can be adjusted with
+`--encoder-queue-maxsize`. If a runtime encoder is incompatible with streaming, retry explicitly
+with `--video-encoding-mode staged-png` and retain the mode and queue size in export provenance.
 
 Validate the completed local dataset in the same pinned environment:
 
