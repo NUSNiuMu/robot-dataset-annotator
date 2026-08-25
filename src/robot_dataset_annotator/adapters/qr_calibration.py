@@ -147,6 +147,7 @@ def estimate_qr_transform(
     frame_start: int = 0,
     frame_end_exclusive: int | None = None,
     head_pose_child_frame: str | None = None,
+    head_static_calibration_source: Path | None = None,
     minimum_detections: int = 3,
     maximum_reprojection_error_px: float = 3.0,
     marker_type: str = "qr_code",
@@ -165,7 +166,10 @@ def estimate_qr_transform(
     if frame_start < 0 or end > frame_count or end <= frame_start:
         raise ValueError("invalid QR calibration frame range")
     ros = head_frame_calibration(
-        source, manifest, head_pose_child_frame=head_pose_child_frame
+        source,
+        manifest,
+        head_pose_child_frame=head_pose_child_frame,
+        static_calibration_source=head_static_calibration_source,
     )
     if ros["distortion_model"] not in {"", "plumb_bob", "rational_polynomial"}:
         raise ValueError(
@@ -323,6 +327,10 @@ def estimate_qr_transform(
         },
         "source": {
             "bag": source.name,
+            "head_static_calibration_bag": ros["static_calibration_source"],
+            "head_static_calibration_borrowed": ros[
+                "static_calibration_borrowed"
+            ],
             "review_manifest_sha256": _sha256(review_manifest_path),
             "head_image_topic": image_topic,
             "head_pose_topic": pose_topic,

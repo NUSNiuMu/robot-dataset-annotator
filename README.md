@@ -94,6 +94,10 @@ NPZ 输入包含 `state` 和 `state_valid`；Insight review parquet 可改用
 指向图案上方，Z 从印刷面向外。
 读取 `/tf_static` 时会合并分开发出的静态消息，直到获得头部 IMU 到 RGB 相机的完整外参链，
 避免因静态消息发布顺序不同而误报缺少头部相机外参。
+若当前录制确实缺少这条链，但同一套未重新装配的头部设备在另一录制中保留了完整外参，可在
+二维码标定和导出时显式传入 `--head-static-calibration-source <recording-dir>`。工具仍从当前
+录制读取图像、内参和全局 pose，只借用参考录制的静态外参，并在二维码 JSON 与导出清单中
+记录参考 take 和 `static_calibration_borrowed`，不得用该参数跨设备或跨重新装配过程复用外参。
 
 若全局 pose 只有瞬时尖峰，或发生一次坐标系跳变后相对运动仍连续，可先生成不覆盖原始值的
 修复 manifest：

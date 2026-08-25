@@ -133,6 +133,7 @@ def head_frame_calibration(
     manifest: dict[str, Any],
     *,
     head_pose_child_frame: str | None = None,
+    static_calibration_source: Path | None = None,
 ) -> dict[str, Any]:
     cameras = [
         row for row in manifest.get("source_cameras", []) if row.get("role") == "head"
@@ -147,12 +148,29 @@ def head_frame_calibration(
     pose_topic = str(pose_row["topic"])
     camera_name = str(camera_row.get("name", ""))
     pose_child = head_pose_child_frame or f"{camera_name}_camera_imu"
+    calibration_source = static_calibration_source or source
     ros = read_ros_frame_calibration(
         source,
         pose_topic=pose_topic,
         camera_info_topic_name=camera_info_topic(image_topic),
-        required_static_path=(pose_child, f"{camera_name}_camera_rgb"),
+        required_static_path=(
+            (pose_child, f"{camera_name}_camera_rgb")
+            if calibration_source == source
+            else None
+        ),
     )
+    if calibration_source != source:
+        reference = read_ros_frame_calibration(
+            calibration_source,
+            pose_topic=pose_topic,
+            camera_info_topic_name=camera_info_topic(image_topic),
+            required_static_path=(pose_child, f"{camera_name}_camera_rgb"),
+        )
+        if reference.get("camera_frame") != ros.get("camera_frame"):
+            raise ValueError(
+                "static calibration source uses a different head camera frame"
+            )
+        ros["static_transforms"] = reference["static_transforms"]
     ros.update(
         {
             "camera_row": camera_row,
@@ -160,6 +178,8 @@ def head_frame_calibration(
             "image_topic": image_topic,
             "pose_topic": pose_topic,
             "head_pose_child_frame": pose_child,
+            "static_calibration_source": calibration_source.name,
+            "static_calibration_borrowed": calibration_source != source,
             "tracking_from_camera": lookup_static_transform(
                 ros["static_transforms"], pose_child, ros["camera_frame"]
             ),

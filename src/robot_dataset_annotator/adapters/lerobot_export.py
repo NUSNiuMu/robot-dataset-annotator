@@ -541,6 +541,7 @@ def export_insight_lerobot(
     max_skew_ms: float | None = None,
     vcodec: str = "h264",
     head_pose_child_frame: str | None = None,
+    head_static_calibration_source: Path | None = None,
     streaming_video_encoding: bool = True,
     encoder_queue_maxsize: int = 256,
     encoder_threads: int = 2,
@@ -558,6 +559,7 @@ def export_insight_lerobot(
         source,
         review_manifest,
         head_pose_child_frame=head_pose_child_frame,
+        static_calibration_source=head_static_calibration_source,
     )
     plans = build_frame_plan(
         review_manifest,
@@ -732,6 +734,12 @@ def export_insight_lerobot(
                 "head_pose_from_camera": head_calibration[
                     "tracking_from_camera"
                 ].tolist(),
+                "static_calibration_source": head_calibration[
+                    "static_calibration_source"
+                ],
+                "static_calibration_borrowed": head_calibration[
+                    "static_calibration_borrowed"
+                ],
             },
             "progress_semantics": {
                 "annotation.task_progress": (

@@ -132,6 +132,11 @@ def _export_lerobot(args: argparse.Namespace) -> int:
         max_skew_ms=args.max_skew_ms,
         vcodec=args.vcodec,
         head_pose_child_frame=args.head_pose_child_frame,
+        head_static_calibration_source=(
+            args.head_static_calibration_source.expanduser().resolve()
+            if args.head_static_calibration_source
+            else None
+        ),
         streaming_video_encoding=args.video_encoding_mode == "streaming",
         encoder_queue_maxsize=args.encoder_queue_maxsize,
         encoder_threads=args.encoder_threads,
@@ -151,6 +156,11 @@ def _calibrate_qr(args: argparse.Namespace) -> int:
         frame_start=args.frame_start,
         frame_end_exclusive=args.frame_end_exclusive,
         head_pose_child_frame=args.head_pose_child_frame,
+        head_static_calibration_source=(
+            args.head_static_calibration_source.expanduser().resolve()
+            if args.head_static_calibration_source
+            else None
+        ),
         minimum_detections=args.minimum_detections,
         maximum_reprojection_error_px=args.maximum_reprojection_error_px,
         marker_type=args.marker_type,
@@ -307,6 +317,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--head-pose-child-frame",
         help="tracking child frame represented by the head pose topic",
     )
+    export_lerobot.add_argument(
+        "--head-static-calibration-source",
+        type=Path,
+        help=(
+            "recording whose tf_static supplies the head tracking-to-RGB transform "
+            "when it is absent from the source recording"
+        ),
+    )
     export_lerobot.set_defaults(handler=_export_lerobot)
 
     calibrate_qr = commands.add_parser(
@@ -324,6 +342,14 @@ def build_parser() -> argparse.ArgumentParser:
     calibrate_qr.add_argument("--frame-start", type=int, default=0)
     calibrate_qr.add_argument("--frame-end-exclusive", type=int, required=True)
     calibrate_qr.add_argument("--head-pose-child-frame")
+    calibrate_qr.add_argument(
+        "--head-static-calibration-source",
+        type=Path,
+        help=(
+            "recording whose tf_static supplies the head tracking-to-RGB transform "
+            "when it is absent from the source recording"
+        ),
+    )
     calibrate_qr.add_argument("--minimum-detections", type=int, default=3)
     calibrate_qr.add_argument(
         "--maximum-reprojection-error-px", type=float, default=3.0

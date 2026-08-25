@@ -112,6 +112,11 @@ rewrite camera poses or discard the source context after producing it.
 Static transforms may be split across multiple latched `/tf_static` messages. The adapter merges
 messages until it finds the complete head-IMU-to-RGB path; do not treat the first static message as
 the complete calibration set.
+If that path is genuinely absent but another recording from the same, unchanged head device has it,
+pass `--head-static-calibration-source <recording-dir>` to both QR calibration and export. This only
+borrows `tf_static`; current images, intrinsics, and global poses remain authoritative. Confirm the
+device was not remounted. The QR JSON and export manifest must identify the reference recording and
+set `static_calibration_borrowed`; never hardcode or silently borrow the transform.
 
 Before QR calibration or export, audit global pose continuity:
 
