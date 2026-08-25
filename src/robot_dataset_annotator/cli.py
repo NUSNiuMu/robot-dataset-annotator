@@ -134,6 +134,7 @@ def _export_lerobot(args: argparse.Namespace) -> int:
         head_pose_child_frame=args.head_pose_child_frame,
         streaming_video_encoding=args.video_encoding_mode == "streaming",
         encoder_queue_maxsize=args.encoder_queue_maxsize,
+        encoder_threads=args.encoder_threads,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
@@ -291,6 +292,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "maximum queued frames per streaming video encoder (default: 256); "
             "increase only when the encoder cannot keep up with source decoding"
+        ),
+    )
+    export_lerobot.add_argument(
+        "--encoder-threads",
+        type=int,
+        default=2,
+        help=(
+            "threads per camera encoder (default: 2); keep the combined camera "
+            "encoders within the available CPU cores when batching exports"
         ),
     )
     export_lerobot.add_argument(

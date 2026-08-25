@@ -543,6 +543,7 @@ def export_insight_lerobot(
     head_pose_child_frame: str | None = None,
     streaming_video_encoding: bool = True,
     encoder_queue_maxsize: int = 256,
+    encoder_threads: int = 2,
 ) -> dict[str, Any]:
     if output.exists():
         raise FileExistsError(f"refusing to overwrite dataset: {output}")
@@ -577,6 +578,8 @@ def export_insight_lerobot(
         raise ValueError("max_skew_ms must be positive")
     if encoder_queue_maxsize <= 0:
         raise ValueError("encoder_queue_maxsize must be positive")
+    if encoder_threads <= 0:
+        raise ValueError("encoder_threads must be positive")
     tolerance_ns = round((max_skew_ms or (1000.0 / fps)) * 1_000_000)
 
     try:
@@ -599,6 +602,7 @@ def export_insight_lerobot(
             vcodec=vcodec,
             streaming_encoding=streaming_video_encoding,
             encoder_queue_maxsize=encoder_queue_maxsize,
+            encoder_threads=encoder_threads,
         )
         images: dict[int, dict[str, np.ndarray]] = {}
         next_to_write = 0
@@ -690,6 +694,7 @@ def export_insight_lerobot(
             "encoder_queue_maxsize": (
                 encoder_queue_maxsize if streaming_video_encoding else None
             ),
+            "encoder_threads": encoder_threads,
             "task_id": task.task_id,
             "episodes": validation.episodes,
             "frames": len(plans),

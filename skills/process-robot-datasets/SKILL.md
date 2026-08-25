@@ -139,7 +139,9 @@ head tracking pose, and the head RGB-camera global pose obtained from the record
 Camera frames use direct streaming encoding by default to avoid temporary PNG disk traffic. If a
 runtime encoder falls briefly behind source decoding, keep the bounded encoder queue large enough
 to avoid frame loss; the default is 256 frames per camera and can be adjusted with
-`--encoder-queue-maxsize`. If a runtime encoder is incompatible with streaming, retry explicitly
+`--encoder-queue-maxsize`. Each camera encoder defaults to two threads so three-camera or batched
+exports do not oversubscribe a modest CPU; adjust this with `--encoder-threads` and retain its value
+in export provenance. If a runtime encoder is incompatible with streaming, retry explicitly
 with `--video-encoding-mode staged-png` and retain the mode and queue size in export provenance.
 
 Validate the completed local dataset in the same pinned environment:
