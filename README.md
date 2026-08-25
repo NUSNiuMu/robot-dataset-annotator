@@ -108,6 +108,8 @@ NPZ 输入包含 `state` 和 `state_valid`；Insight review parquet 可改用
 其余中等幅度或连续异常会标成 `NEEDS_REVIEW`，不会自动修改。修复 manifest 同时
 保留 `raw_positions`、`raw_quaternions_xyzw` 和逐帧 correction mask；导出与 ArUco 标定都应
 使用审核通过的修复 manifest。
+旋转阈值同时考虑 review 帧率可能高于 pose 发布频率；重复采样后集中到单个 review 帧的合理
+手部旋转不会被误判成坐标漂移。
 
 ## 导出 LeRobot
 

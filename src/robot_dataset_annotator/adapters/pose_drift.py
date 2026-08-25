@@ -137,7 +137,10 @@ def correct_pose_stream(
             )
 
     translation_threshold = _robust_threshold(translation_steps, 0.10)
-    rotation_threshold = _robust_threshold(rotation_steps, np.deg2rad(20.0))
+    # Review streams run at 30 Hz while some pose topics update more slowly.
+    # A duplicated sample can therefore concentrate a plausible hand rotation
+    # into one review-frame step; 30 degrees avoids classifying that as drift.
+    rotation_threshold = _robust_threshold(rotation_steps, np.deg2rad(30.0))
     jump_steps = [
         index
         for index in range(1, count)
