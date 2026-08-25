@@ -252,9 +252,18 @@ def _validate_low_dimensional_data(
                         f"episode {expected_episode} has invalid independent "
                         f"{hand} subtask order: {actual}, expected {expected}"
                     )
+                phase_by_index = {
+                    index: phase for phase, index in subtask_catalog[hand]
+                }
                 for start, end in zip(run_starts, run_ends):
-                    expected_subtask_progress = np.linspace(
-                        0.0, 1.0, int(end - start), dtype=np.float32
+                    subtask_index = int(values[start])
+                    phase = phase_by_index[subtask_index]
+                    expected_subtask_progress = (
+                        np.zeros(int(end - start), dtype=np.float32)
+                        if phase == -1
+                        else np.linspace(
+                            0.0, 1.0, int(end - start), dtype=np.float32
+                        )
                     )
                     if not np.allclose(
                         progress[start:end], expected_subtask_progress, atol=1e-6
