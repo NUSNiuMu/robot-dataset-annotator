@@ -117,9 +117,10 @@ Before QR calibration or export, audit global pose continuity:
       --audit <review-dir>/pose_drift_audit.json
 
 Use the corrected manifest only when the audit is `PASS`. The command may interpolate paired short
-spikes or stitch a high-confidence persistent coordinate jump while preserving subsequent relative
-motion. It writes a new manifest with raw arrays and correction masks; ambiguous jumps remain
-unchanged and force `NEEDS_REVIEW`.
+spikes, stitch a high-confidence persistent coordinate jump, or progressively stitch a short,
+directional coordinate-drift transition whose cumulative displacement is physically implausible.
+Subsequent relative motion remains intact. It writes a new manifest with raw arrays and correction
+masks; ambiguous jumps remain unchanged and force `NEEDS_REVIEW`.
 
 For a reviewed single-segment Insight MCAP, export three source camera streams and synchronized
 poses to LeRobotDataset v3.0 with explicit paths:

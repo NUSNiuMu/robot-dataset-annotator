@@ -175,6 +175,7 @@ def _correct_pose_drift(args: argparse.Namespace) -> int:
         output_manifest_path=args.output_manifest.expanduser().resolve(),
         audit_path=args.audit.expanduser().resolve(),
         maximum_spike_frames=args.maximum_spike_frames,
+        maximum_drift_transition_frames=args.maximum_drift_transition_frames,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["status"] == "PASS" else 2
@@ -323,6 +324,9 @@ def build_parser() -> argparse.ArgumentParser:
     correct_pose_drift.add_argument("--output-manifest", type=Path, required=True)
     correct_pose_drift.add_argument("--audit", type=Path, required=True)
     correct_pose_drift.add_argument("--maximum-spike-frames", type=int, default=3)
+    correct_pose_drift.add_argument(
+        "--maximum-drift-transition-frames", type=int, default=45
+    )
     correct_pose_drift.set_defaults(handler=_correct_pose_drift)
 
     resume = commands.add_parser("resume", help="prepare or run the next transition")

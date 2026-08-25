@@ -66,12 +66,58 @@ def _runs(values: list[int]) -> list[tuple[int, int]]:
     return result
 
 
+def _progressive_drift_clusters(
+    jump_steps: list[int],
+    matrices: np.ndarray,
+    *,
+    count: int,
+    maximum_frames: int,
+    minimum_translation: float,
+) -> list[list[int]]:
+    """Find short, directional runs of implausible coordinate-frame motion."""
+    if not jump_steps:
+        return []
+    clusters: list[list[int]] = [[jump_steps[0]]]
+    for step in jump_steps[1:]:
+        if step - clusters[-1][-1] <= 3:
+            clusters[-1].append(step)
+        else:
+            clusters.append([step])
+
+    jump_set = set(jump_steps)
+    result: list[list[int]] = []
+    for cluster in clusters:
+        start = cluster[0]
+        end = cluster[-1] + 1
+        if len(cluster) < 4 or end - start > maximum_frames:
+            continue
+        stable_end = min(count, end + 6)
+        if stable_end - end < 6 or any(
+            step in jump_set for step in range(end, stable_end)
+        ):
+            continue
+        vectors = np.asarray(
+            [
+                matrices[step, :3, 3] - matrices[step - 1, :3, 3]
+                for step in cluster
+            ],
+            dtype=np.float64,
+        )
+        path_length = float(np.linalg.norm(vectors, axis=1).sum())
+        net_translation = float(np.linalg.norm(vectors.sum(axis=0)))
+        directional_ratio = net_translation / max(path_length, 1e-12)
+        if net_translation >= minimum_translation and directional_ratio >= 0.85:
+            result.append(cluster)
+    return result
+
+
 def correct_pose_stream(
     positions: np.ndarray,
     quaternions_xyzw: np.ndarray,
     valid: np.ndarray,
     *,
     maximum_spike_frames: int = 3,
+    maximum_drift_transition_frames: int = 45,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
     translations = np.asarray(positions, dtype=np.float64)
     quaternions = np.asarray(quaternions_xyzw, dtype=np.float64)
@@ -144,6 +190,37 @@ def correct_pose_stream(
     unresolved_steps: list[int] = []
     persistent_translation = max(0.15, 1.5 * translation_threshold)
     persistent_rotation = max(np.deg2rad(30.0), 1.5 * rotation_threshold)
+    progressive_clusters = _progressive_drift_clusters(
+        [step for step in jump_steps if step not in consumed],
+        matrices,
+        count=count,
+        maximum_frames=maximum_drift_transition_frames,
+        minimum_translation=max(0.50, 3.0 * persistent_translation),
+    )
+    progressive_steps = {
+        step for cluster in progressive_clusters for step in cluster
+    }
+    consumed.update(progressive_steps)
+    for cluster in progressive_clusters:
+        vectors = np.asarray(
+            [
+                matrices[step, :3, 3] - matrices[step - 1, :3, 3]
+                for step in cluster
+            ],
+            dtype=np.float64,
+        )
+        path_length = float(np.linalg.norm(vectors, axis=1).sum())
+        net_translation = float(np.linalg.norm(vectors.sum(axis=0)))
+        events.append(
+            {
+                "type": "progressive_coordinate_drift",
+                "frame_start": cluster[0],
+                "frame_end_exclusive": cluster[-1] + 1,
+                "jump_frames": cluster,
+                "net_translation_m": net_translation,
+                "directional_ratio": net_translation / max(path_length, 1e-12),
+            }
+        )
     for index in jump_steps:
         if index in consumed:
             continue
@@ -172,21 +249,24 @@ def correct_pose_stream(
     correction = np.eye(4, dtype=np.float64)
     persistent_set = set(persistent_steps)
     for index in range(count):
-        if index in persistent_set:
+        if index in persistent_set or index in progressive_steps:
             previous = corrected_matrices[index - 1]
             before_previous = corrected_matrices[index - 2]
             previous_motion = np.linalg.inv(before_previous) @ previous
             expected = previous @ previous_motion
             correction = expected @ np.linalg.inv(matrices[index])
-            events.append(
-                {
-                    "type": "persistent_coordinate_jump",
-                    "frame": index,
-                    "translation_step_m": float(translation_steps[index]),
-                    "rotation_step_deg": float(np.rad2deg(rotation_steps[index])),
-                    "correction_global_from_raw": correction.tolist(),
-                }
-            )
+            if index in persistent_set:
+                events.append(
+                    {
+                        "type": "persistent_coordinate_jump",
+                        "frame": index,
+                        "translation_step_m": float(translation_steps[index]),
+                        "rotation_step_deg": float(
+                            np.rad2deg(rotation_steps[index])
+                        ),
+                        "correction_global_from_raw": correction.tolist(),
+                    }
+                )
         corrected_matrices[index] = correction @ matrices[index]
 
     corrected_positions = corrected_matrices[:, :3, 3].copy()
@@ -209,6 +289,8 @@ def correct_pose_stream(
             )
     for index in persistent_steps:
         correction_mask[index:] = True
+    for cluster in progressive_clusters:
+        correction_mask[cluster[0] :] = True
     corrected_positions[~pose_valid] = translations[~pose_valid]
     corrected_quaternions[~pose_valid] = quaternions[~pose_valid]
     audit = {
@@ -222,6 +304,10 @@ def correct_pose_stream(
                 np.rad2deg(persistent_rotation)
             ),
             "maximum_spike_frames": maximum_spike_frames,
+            "maximum_drift_transition_frames": maximum_drift_transition_frames,
+            "progressive_drift_minimum_translation_m": float(
+                max(0.50, 3.0 * persistent_translation)
+            ),
         },
         "events": sorted(
             events,
@@ -242,6 +328,7 @@ def correct_review_manifest_pose_drift(
     output_manifest_path: Path,
     audit_path: Path,
     maximum_spike_frames: int = 3,
+    maximum_drift_transition_frames: int = 45,
 ) -> dict[str, Any]:
     for output in (output_manifest_path, audit_path):
         if output.exists():
@@ -257,6 +344,7 @@ def correct_review_manifest_pose_drift(
             np.asarray(row["quaternions_xyzw"], dtype=np.float64),
             np.asarray(row["valid"], dtype=bool),
             maximum_spike_frames=maximum_spike_frames,
+            maximum_drift_transition_frames=maximum_drift_transition_frames,
         )
         corrected_row = dict(row)
         corrected_row["raw_positions"] = row["positions"]
