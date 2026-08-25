@@ -109,6 +109,9 @@ substitute the 0.16 m workspace-marker size used by other UMI IDs.
 
 The JSON stores `global_from_qr` and `qr_from_global`. It is calibration evidence only: do not
 rewrite camera poses or discard the source context after producing it.
+Static transforms may be split across multiple latched `/tf_static` messages. The adapter merges
+messages until it finds the complete head-IMU-to-RGB path; do not treat the first static message as
+the complete calibration set.
 
 Before QR calibration or export, audit global pose continuity:
 

@@ -26,6 +26,7 @@ def read_ros_frame_calibration(
     *,
     pose_topic: str,
     camera_info_topic_name: str,
+    required_static_path: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
     try:
         import rosbag2_py
@@ -46,9 +47,9 @@ def read_ros_frame_calibration(
         raise ValueError(f"source bag is missing calibration topics: {missing}")
     result: dict[str, Any] = {"static_transforms": []}
     seen: set[str] = set()
-    while reader.has_next() and seen != required:
+    while reader.has_next():
         topic, raw, _ = reader.read_next()
-        if topic not in required or topic in seen:
+        if topic not in required or (topic != "/tf_static" and topic in seen):
             continue
         message = deserialize_message(raw, get_message(types[topic]))
         if topic == pose_topic:
@@ -82,6 +83,20 @@ def read_ros_frame_calibration(
                     )
                 )
         seen.add(topic)
+        if seen != required:
+            continue
+        if required_static_path is None:
+            break
+        try:
+            lookup_static_transform(
+                result["static_transforms"],
+                required_static_path[0],
+                required_static_path[1],
+            )
+        except ValueError:
+            # Static transforms may be split across multiple latched messages.
+            continue
+        break
     return result
 
 
@@ -130,13 +145,14 @@ def head_frame_calibration(
     camera_row, pose_row = cameras[0], poses[0]
     image_topic = str(camera_row["topic"])
     pose_topic = str(pose_row["topic"])
+    camera_name = str(camera_row.get("name", ""))
+    pose_child = head_pose_child_frame or f"{camera_name}_camera_imu"
     ros = read_ros_frame_calibration(
         source,
         pose_topic=pose_topic,
         camera_info_topic_name=camera_info_topic(image_topic),
+        required_static_path=(pose_child, f"{camera_name}_camera_rgb"),
     )
-    camera_name = str(camera_row.get("name", ""))
-    pose_child = head_pose_child_frame or f"{camera_name}_camera_imu"
     ros.update(
         {
             "camera_row": camera_row,
