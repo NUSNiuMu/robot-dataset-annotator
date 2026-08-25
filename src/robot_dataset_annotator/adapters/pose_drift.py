@@ -235,7 +235,18 @@ def correct_pose_stream(
             translation_steps[index] > persistent_translation
             or rotation_steps[index] > persistent_rotation
         )
-        if stable_after and very_large and index >= 2 and pose_valid[index - 2]:
+        # Once this stream has already exhibited a confirmed coordinate-frame
+        # jump, treat later stable jumps above the normal jump threshold as
+        # part of the same instability chain. Trackers commonly recover in
+        # several stages, leaving residual steps below the deliberately
+        # conservative first-jump threshold.
+        chained_instability = bool(persistent_steps or progressive_clusters)
+        if (
+            stable_after
+            and (very_large or chained_instability)
+            and index >= 2
+            and pose_valid[index - 2]
+        ):
             persistent_steps.append(index)
         else:
             unresolved_steps.append(index)

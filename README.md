@@ -103,8 +103,9 @@ NPZ 输入包含 `state` 和 `state_valid`；Insight review parquet 可改用
   --audit recording/review/pose_drift_audit.json
 ```
 
-高置信度短尖峰使用相邻有效 pose 插值；高置信度持续跳变从跳变帧起拼接回上一坐标段；短时、
-同方向且累计位移不可能由真实手部运动产生的渐进坐标漂移，会逐跳拼接并保留漂移后的相对运动。
+高置信度短尖峰使用相邻有效 pose 插值；高置信度持续跳变及其后续稳定残余跳变从跳变帧起拼接回
+上一坐标段；短时、同方向且累计位移不可能由真实手部运动产生的渐进坐标漂移，会逐跳拼接并保留
+漂移后的相对运动。
 其余中等幅度或连续异常会标成 `NEEDS_REVIEW`，不会自动修改。修复 manifest 同时
 保留 `raw_positions`、`raw_quaternions_xyzw` 和逐帧 correction mask；导出与 ArUco 标定都应
 使用审核通过的修复 manifest。
