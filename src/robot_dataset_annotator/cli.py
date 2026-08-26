@@ -193,6 +193,23 @@ def _correct_pose_drift(args: argparse.Namespace) -> int:
     return 0 if result["status"] == "PASS" else 2
 
 
+def _visualize_trajectories(args: argparse.Namespace) -> int:
+    from .adapters.trajectory_qc import visualize_trajectory_batch
+
+    result = visualize_trajectory_batch(
+        input_root=args.input_root,
+        output=args.output,
+        write_png=args.write_png,
+        maximum_points=args.maximum_points,
+        hand_step_warning_m=args.hand_step_warning_m,
+        head_step_warning_m=args.head_step_warning_m,
+        hand_head_distance_warning_m=args.hand_head_distance_warning_m,
+        minimum_valid_fraction=args.minimum_valid_fraction,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _resume(args: argparse.Namespace) -> int:
     config = SessionConfig.load(args.config.expanduser().resolve())
     try:
@@ -374,6 +391,32 @@ def build_parser() -> argparse.ArgumentParser:
         "--maximum-drift-transition-frames", type=int, default=45
     )
     correct_pose_drift.set_defaults(handler=_correct_pose_drift)
+
+    visualize_trajectories = commands.add_parser(
+        "visualize-trajectories",
+        help="visualize raw and corrected 3D pose trajectories for a batch",
+    )
+    visualize_trajectories.add_argument("--input-root", type=Path, required=True)
+    visualize_trajectories.add_argument("--output", type=Path, required=True)
+    visualize_trajectories.add_argument(
+        "--write-png",
+        action="store_true",
+        help="also render per-take and overview PNG files (requires matplotlib)",
+    )
+    visualize_trajectories.add_argument("--maximum-points", type=int, default=800)
+    visualize_trajectories.add_argument(
+        "--hand-step-warning-m", type=float, default=0.12
+    )
+    visualize_trajectories.add_argument(
+        "--head-step-warning-m", type=float, default=0.05
+    )
+    visualize_trajectories.add_argument(
+        "--hand-head-distance-warning-m", type=float, default=1.25
+    )
+    visualize_trajectories.add_argument(
+        "--minimum-valid-fraction", type=float, default=0.95
+    )
+    visualize_trajectories.set_defaults(handler=_visualize_trajectories)
 
     resume = commands.add_parser("resume", help="prepare or run the next transition")
     resume.add_argument("--config", type=Path, required=True)

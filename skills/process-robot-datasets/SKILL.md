@@ -132,6 +132,21 @@ may also establish the instability chain for independent medium stable jumps ear
 Subsequent relative motion remains intact. It writes a new manifest with raw arrays and correction
 masks; ambiguous jumps remain unchanged and force `NEEDS_REVIEW`.
 
+For batch trajectory inspection, generate a self-contained interactive 3D dashboard and machine-
+readable QC report from the reviewed recording root:
+
+    rda visualize-trajectories --input-root <recordings-root> \
+      --output <trajectory-qc-dir> --write-png
+
+Select the corrected manifest referenced by a final PASS audit; do not select files by a filename
+guess when earlier `NEEDS_REVIEW` or pre-settling artifacts coexist. When `qr_transform.json` is
+available, visualize both raw and corrected trajectories in the QR frame so recordings share a
+meaningful origin. Treat step, hand-to-head distance, validity, QR-quality, and robust-centroid
+warnings as navigation evidence only. Hand-to-head distance catches spatially implausible residual
+drift even when correction makes every individual step continuous. Inspect every
+`REVIEW_REQUIRED` plot before excluding or reprocessing data; the visualizer must never rewrite
+poses or decisions.
+
 For a reviewed single-segment Insight MCAP, export three source camera streams and synchronized
 poses to LeRobotDataset v3.0 with explicit paths:
 

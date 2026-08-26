@@ -53,6 +53,11 @@ SE(3) 上插值；短时、同方向且累计位移明显不可能的渐进漂�
 不满足高置信度条件的跳变只写 `NEEDS_REVIEW`。修复结果写到新 manifest，保留原始数组、
 逐帧 correction mask、阈值和事件审计，不覆盖源 review manifest。
 
+`adapters/trajectory_qc.py` 消费 decisions、最终 PASS 漂移审计、修复 manifest 和可选二维码
+标定，生成 raw/corrected 三路轨迹的自包含交互式 HTML、JSON/CSV 指标和可选 PNG。二维码
+变换只在显示和跨 take 比较时应用，不回写 pose。步长、有效率、手部到头部的相对距离、
+二维码质量和稳健轨迹中心只用于提出人工复核候选，不改变 decisions、审计状态或训练数据。
+
 `adapters/lerobot_validation.py` 先直接检查 Parquet 的 row、episode、timestamp、source
 frame、原子动作、有效性和 next-frame action 不变量，再完整解码每一个视频文件。随后用
 官方 `LeRobotDataset` 做代表性索引并通过 PyTorch DataLoader 读取一个 batch；两个阶段分别

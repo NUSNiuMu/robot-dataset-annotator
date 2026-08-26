@@ -120,6 +120,32 @@ pose 流中存在已确认的大幅坐标跳变，其前后独立出现的中等
 旋转阈值同时考虑 review 帧率可能高于 pose 发布频率；重复采样后集中到单个 review 帧的合理
 手部旋转不会被误判成坐标漂移。
 
+## 3D 轨迹质检
+
+完成漂移审计后，可以批量生成 raw/corrected 三路 pose 的交互式 3D 对比、逐帧步长曲线和
+机器可读质量报告。工具优先读取每个 take 的 PASS 漂移审计所引用的修复 manifest；若存在
+二维码标定，则用 `qr_from_global` 把轨迹统一到二维码坐标系，避免把不同 take 的全局原点
+差异误当成真实运动：
+
+```bash
+.venv/bin/pip install -e '.[visualization]'
+.venv/bin/rda visualize-trajectories \
+  --input-root recordings/ \
+  --output outputs/trajectory-qc \
+  --write-png
+```
+
+输出包括可拖动旋转和缩放的 `index.html`、详细 `report.json`、表格 `summary.csv`，以及可选
+的逐 take PNG 和总览图。HTML 中 raw 为低透明虚线、corrected 为实线，黄色点表示发生 pose
+修正的区域。
+
+默认质量提示阈值是：训练区间内手部单帧位移 0.12 m、头部单帧位移 0.05 m、pose 有效率
+95%、训练帧手部到头部距离的 99 分位数 1.25 m、二维码平移标准差 0.02 m、二维码最大重投影
+误差 3 px。手部到头部距离用于发现单帧轨迹已经连续、但整段仍被拼到错误空间位置的残留漂移；
+二维码坐标下的轨迹中心还会做跨 take 的稳健离群检查。`REVIEW_REQUIRED` 只是人工复核提示，
+不能据此自动删除数据；
+`PASS_AFTER_CORRECTION` 表示修复后未触发残余连续性告警。
+
 ## 导出 LeRobot
 
 Insight MCAP 在完成穷尽审核后可导出为 LeRobotDataset v3.0。导出器要求 ROS 2 环境提供
