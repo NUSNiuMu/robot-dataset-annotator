@@ -141,9 +141,12 @@ readable QC report from the reviewed recording root:
 Select the corrected manifest referenced by a final PASS audit; do not select files by a filename
 guess when earlier `NEEDS_REVIEW` or pre-settling artifacts coexist. When `qr_transform.json` is
 available, visualize both raw and corrected trajectories in the QR frame so recordings share a
-meaningful origin. Treat step, hand-to-head distance, validity, QR-quality, and robust-centroid
-warnings as navigation evidence only. Hand-to-head distance catches spatially implausible residual
-drift even when correction makes every individual step continuous. Inspect every
+meaningful origin. Render only context and training frames selected by the final decisions; never
+let a discarded post-drift suffix reappear in 3D tracks or per-take correction plots. Rate temporal
+pose continuity and validity inside those selected ranges. Keep hand-to-head distance as navigation
+evidence only, never as a rating gate. QR quality and robust-centroid checks may independently flag
+calibration or cross-take spatial consistency, but they are not temporal VIO-drift evidence. Use
+`PASS_AFTER_CORRECTION` only when the selected ranges contain corrected frames. Inspect every
 `REVIEW_REQUIRED` plot before excluding or reprocessing data; the visualizer must never rewrite
 poses or decisions.
 
@@ -184,9 +187,11 @@ working dataset keeps `rda/` because the exporter and validators store provenanc
 there; `rda/` is an RDA extension, not part of the LeRobot v3 schema. The official writer may also
 leave empty `images/<video-key>/` staging directories after encoding `dtype: video` features. Check
 that `images/` contains no files before treating it as disposable; never remove it when files remain.
-For this video-backed export, create a separate strict delivery copy containing only `data/`,
-`meta/`, and `videos/`, keep the `rda/` evidence beside that copy, and do not modify the validated
-working dataset. The `observation.images.*` feature names in `meta/info.json` still point through
+For this video-backed export, create a separate strict delivery copy containing `data/`, `meta/`,
+and `videos/`; an explicitly required immutable calibration sidecar such as `qr_transform.json` may
+also be copied at the delivery root. Keep the `rda/` evidence beside that copy and do not modify the
+validated working dataset. Confirm the official loader still opens the package with any approved
+sidecar. The `observation.images.*` feature names in `meta/info.json` still point through
 `video_path` to MP4 files under `videos/`; they do not require the empty root `images/` directory.
 
 ## Resume and validate

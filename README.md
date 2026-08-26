@@ -4,8 +4,9 @@
 rosbag、相机名称、任务类型、工作目录或导出格式；这些差异由任务插件、数据源适配器和会话
 配置提供。
 
-当前内置 `cup-pick-place` 和 `cup-stacking` 两个任务。前者采用人工穷尽审核，保留二维码
-上下文并标注四阶段任务边界；不再包含旧夹杯自动分割算法。后者把三杯速叠循环定义为“搭塔”
+当前内置 `cup-pick-place` 和 `cup-stacking` 两个任务。前者采用人工穷尽审核，先独立保留二维码
+标定上下文，再标注四阶段任务边界；二维码变换落盘后，训练导出可以不包含标定上下文。该任务
+不再包含旧夹杯自动分割算法。后者把三杯速叠循环定义为“搭塔”
 和“收拢”两阶段，并能从同步双手位姿提示同一源片段中的多个循环。新任务可以复用批次状态机、
 多人审核 schema、穷尽审核门和验收报告，不需要复制已有任务代码。
 
@@ -48,11 +49,13 @@ Skill 不保存项目路径；每次新环境首次执行时会要求确认路�
 NPZ 输入包含 `state` 和 `state_valid`；Insight review parquet 可改用
 `--format insight-parquet`。
 
-`cup-pick-place` 没有自动建议插件，必须人工审核三路视频。其 decisions 可以为 episode
-增加 `context_start_frame`，它早于
-`episode_start_frame`，用于保留头部相机仍能看到二维码的标定上下文。上下文帧不会归入四个
-操作阶段；导出时标记为 `atomic_action_index=-1` 和 `qr_localization_context`。四阶段边界均
-由审核者在原始 source frame 坐标下填写，不能删除二维码前缀。
+`cup-pick-place` 没有自动建议插件，必须人工审核三路视频。标定阶段不能从源 review 中删除
+头部相机仍能看到二维码的前缀；可用独立 context decisions 或明确帧范围生成
+`qr_transform.json`。若训练集也需要这些帧，episode 可增加早于 `episode_start_frame` 的
+`context_start_frame`，导出后它们标记为 `atomic_action_index=-1` 和
+`qr_localization_context`。若只需要全局二维码变换，标定完成后最终训练 decisions 可以省略
+`context_start_frame`，此时导出清单的 `context_frames` 必须为 0。四阶段边界仍由审核者在
+原始 source frame 坐标下填写。
 
 ```json
 {
@@ -136,15 +139,16 @@ pose 流中存在已确认的大幅坐标跳变，其前后独立出现的中等
 ```
 
 输出包括可拖动旋转和缩放的 `index.html`、详细 `report.json`、表格 `summary.csv`，以及可选
-的逐 take PNG 和总览图。HTML 中 raw 为低透明虚线、corrected 为实线，黄色点表示发生 pose
-修正的区域。
+的逐 take PNG 和总览图。HTML 和逐 take PNG 只绘制最终 decisions 选择的 context/训练区间，
+被截断的漂移区间不会混入轨迹；raw 为低透明虚线、corrected 为实线，黄色点表示所选区间内
+发生 pose 修正的区域。
 
 默认质量提示阈值是：训练区间内手部单帧位移 0.12 m、头部单帧位移 0.05 m、pose 有效率
 95%、训练帧手部到头部距离的 99 分位数 1.25 m、二维码平移标准差 0.02 m、二维码最大重投影
-误差 3 px。手部到头部距离用于发现单帧轨迹已经连续、但整段仍被拼到错误空间位置的残留漂移；
-二维码坐标下的轨迹中心还会做跨 take 的稳健离群检查。`REVIEW_REQUIRED` 只是人工复核提示，
-不能据此自动删除数据；
-`PASS_AFTER_CORRECTION` 表示修复后未触发残余连续性告警。
+误差 3 px。手部到头部距离仍写入报告供人工参考，但不参与漂移判定或自动评级；漂移判断依赖
+pose 的时间连续性、有效率和人工画面复核。二维码坐标下的轨迹中心还会做跨 take 的稳健离群
+提示。`REVIEW_REQUIRED` 只是人工复核提示，不能据此自动删除数据；仅当最终所选区间内实际
+包含 pose 修正且修正后通过检查时才标记 `PASS_AFTER_CORRECTION`。
 
 ## 导出 LeRobot
 

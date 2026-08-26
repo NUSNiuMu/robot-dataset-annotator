@@ -54,9 +54,12 @@ SE(3) 上插值；短时、同方向且累计位移明显不可能的渐进漂�
 逐帧 correction mask、阈值和事件审计，不覆盖源 review manifest。
 
 `adapters/trajectory_qc.py` 消费 decisions、最终 PASS 漂移审计、修复 manifest 和可选二维码
-标定，生成 raw/corrected 三路轨迹的自包含交互式 HTML、JSON/CSV 指标和可选 PNG。二维码
-变换只在显示和跨 take 比较时应用，不回写 pose。步长、有效率、手部到头部的相对距离、
-二维码质量和稳健轨迹中心只用于提出人工复核候选，不改变 decisions、审计状态或训练数据。
+标定，生成 raw/corrected 三路轨迹的自包含交互式 HTML、JSON/CSV 指标和可选 PNG。交互轨迹
+与逐 take PNG 只绘制 decisions 选择的 context/训练帧，不显示被截断区间。二维码变换只在
+显示和跨 take 比较时应用，不回写 pose。步长和有效率参与所选训练区间的时序评级；手部到
+头部的相对距离仅作为人工导航信息，不参与评级。二维码质量和稳健轨迹中心仍可独立触发标定或
+空间一致性复核，但不能当作 VIO 时序漂移证据，也不改变 decisions 或训练数据。只有所选区间
+包含实际修正时才可能标记 `PASS_AFTER_CORRECTION`。
 
 `adapters/lerobot_validation.py` 先直接检查 Parquet 的 row、episode、timestamp、source
 frame、原子动作、有效性和 next-frame action 不变量，再完整解码每一个视频文件。随后用

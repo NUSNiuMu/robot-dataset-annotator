@@ -118,6 +118,7 @@ def _role_metrics(
         selected_frames[max(start, 0) : min(end, len(valid))] = True
     selected_count = int(selected_frames.sum())
     selected_valid = selected_frames & valid
+    selected_corrections = selected_valid & correction_mask
     selected_positions = corrected[selected_valid]
     if len(selected_positions):
         centroid = np.median(selected_positions, axis=0)
@@ -142,7 +143,16 @@ def _role_metrics(
         "correction_fraction": (
             float(correction_mask.mean()) if len(correction_mask) else 0.0
         ),
+        "training_corrected_frames": int(selected_corrections.sum()),
+        "training_correction_fraction": (
+            float(selected_corrections.sum() / selected_count)
+            if selected_count
+            else 0.0
+        ),
         "maximum_correction_offset_m": _safe_max(correction_offsets[valid]),
+        "training_maximum_correction_offset_m": _safe_max(
+            correction_offsets[selected_valid]
+        ),
         "raw_maximum_step_m": _safe_max(raw_steps[full_pairs]),
         "corrected_maximum_step_m": _safe_max(corrected_steps[full_pairs]),
         "training_raw_maximum_step_m": _safe_max(training_raw_steps),
@@ -161,6 +171,7 @@ def _role_metrics(
         "raw": raw,
         "corrected": corrected,
         "valid": valid,
+        "training_frames": selected_valid,
         "correction_mask": correction_mask,
         "corrected_steps": corrected_steps,
         "raw_steps": raw_steps,
@@ -215,7 +226,6 @@ def _initial_rating(
     *,
     hand_step_warning_m: float,
     head_step_warning_m: float,
-    hand_head_distance_warning_m: float,
     minimum_valid_fraction: float,
 ) -> tuple[str, list[str]]:
     if visual_status != "PASS":
@@ -233,15 +243,6 @@ def _initial_rating(
                 f"{role} training validity is "
                 f"{metrics['training_valid_fraction']:.1%}"
             )
-        if (
-            role != "head"
-            and metrics["training_head_distance_p99_m"]
-            >= hand_head_distance_warning_m
-        ):
-            reasons.append(
-                f"{role} training hand-to-head distance p99 reaches "
-                f"{metrics['training_head_distance_p99_m']:.3f} m"
-            )
     if qr_quality is None:
         reasons.append("QR global transform is missing")
     else:
@@ -257,7 +258,9 @@ def _initial_rating(
             )
     if reasons:
         return "REVIEW_REQUIRED", reasons
-    corrected_frames = sum(row["corrected_frames"] for row in role_metrics.values())
+    corrected_frames = sum(
+        row["training_corrected_frames"] for row in role_metrics.values()
+    )
     return ("PASS_AFTER_CORRECTION" if corrected_frames else "PASS"), []
 
 
@@ -324,7 +327,9 @@ def _record_for_take(
         arrays["corrected_display"] = _transform_positions(
             arrays["corrected"], qr_from_global
         )
-        selected_valid = arrays["valid"]
+        # Render only reviewed context/training intervals. Otherwise a VIO-drift
+        # tail remains visible after later episodes are removed from decisions.
+        selected_valid = arrays["training_frames"]
         if metrics["training_centroid"] is not None:
             metrics["training_centroid"] = _transform_positions(
                 np.asarray([metrics["training_centroid"]]), qr_from_global
@@ -369,7 +374,6 @@ def _record_for_take(
         quality,
         hand_step_warning_m=hand_step_warning_m,
         head_step_warning_m=head_step_warning_m,
-        hand_head_distance_warning_m=hand_head_distance_warning_m,
         minimum_valid_fraction=minimum_valid_fraction,
     )
     record = {
@@ -496,7 +500,7 @@ def _write_take_png(
     fps = float(record["fps"])
     for role in ROLES:
         arrays = arrays_by_role[role]
-        valid = arrays["valid"]
+        valid = arrays["training_frames"]
         raw = arrays["raw_display"][valid]
         corrected = arrays["corrected_display"][valid]
         raw_arrays.append(raw)
@@ -523,7 +527,9 @@ def _write_take_png(
         step_axis.plot(times, steps, color=color, linewidth=0.8, label=role)
         correction_axis.plot(
             np.arange(len(arrays["correction_offsets"])) / fps,
-            arrays["correction_offsets"],
+            np.where(
+                arrays["training_frames"], arrays["correction_offsets"], np.nan
+            ),
             color=color,
             linewidth=0.8,
             label=role,
@@ -549,7 +555,7 @@ def _write_take_png(
     step_axis.set_ylabel("Step (m/frame)")
     step_axis.grid(alpha=0.2)
     step_axis.legend(fontsize=8)
-    correction_axis.set_title("Raw-to-corrected position offset")
+    correction_axis.set_title("Raw-to-corrected offset inside reviewed ranges")
     correction_axis.set_xlabel("Time (s)")
     correction_axis.set_ylabel("Offset (m)")
     correction_axis.grid(alpha=0.2)
