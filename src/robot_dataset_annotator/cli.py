@@ -137,6 +137,11 @@ def _export_lerobot(args: argparse.Namespace) -> int:
             if args.head_static_calibration_source
             else None
         ),
+        gripper_calibration_path=(
+            args.gripper_calibration.expanduser().resolve()
+            if args.gripper_calibration
+            else None
+        ),
         streaming_video_encoding=args.video_encoding_mode == "streaming",
         encoder_queue_maxsize=args.encoder_queue_maxsize,
         encoder_threads=args.encoder_threads,
@@ -340,6 +345,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "recording whose tf_static supplies the head tracking-to-RGB transform "
             "when it is absent from the source recording"
+        ),
+    )
+    export_lerobot.add_argument(
+        "--gripper-calibration",
+        type=Path,
+        help=(
+            "ArUco pixel-to-physical-width calibration; when supplied, export "
+            "20D dual-hand pose and gripper state/action"
         ),
     )
     export_lerobot.set_defaults(handler=_export_lerobot)

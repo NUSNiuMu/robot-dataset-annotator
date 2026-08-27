@@ -90,8 +90,16 @@ def _validate_low_dimensional_data(
 
     if not np.array_equal(index, np.arange(row_count)):
         raise ValueError("global dataset index is not contiguous")
-    if state.shape != (row_count, 18) or action.shape != (row_count, 18):
-        raise ValueError("state and action must both have shape Nx18")
+    state_dimension = int((export or {}).get("state_dimension", 18))
+    if state_dimension not in {18, 20}:
+        raise ValueError(f"unsupported state dimension: {state_dimension}")
+    if state.shape != (row_count, state_dimension) or action.shape != (
+        row_count,
+        state_dimension,
+    ):
+        raise ValueError(
+            f"state and action must both have shape Nx{state_dimension}"
+        )
     if head.shape != (row_count, 9):
         raise ValueError("head pose must have shape Nx9")
     if head_camera_global is not None and head_camera_global.shape != (row_count, 9):
@@ -118,6 +126,11 @@ def _validate_low_dimensional_data(
             raise ValueError(f"{label} contains non-finite values")
         if np.any(values[valid == 0] != 0):
             raise ValueError(f"{label} invalid values are not zero-filled")
+    if state_dimension == 20:
+        for values, label in ((state, "state"), (action, "action")):
+            widths = values[:, [9, 19]]
+            if np.any(widths < 0.0):
+                raise ValueError(f"{label} contains negative gripper widths")
 
     if sum(int(row["length"]) for row in episodes) != row_count:
         raise ValueError("episode lengths do not sum to the dataset row count")
@@ -294,9 +307,9 @@ def _validate_low_dimensional_data(
     result = {
         "rows": row_count,
         "episodes": len(episodes),
-        "state_shape": [row_count, 18],
+        "state_shape": [row_count, state_dimension],
         "head_pose_shape": [row_count, 9],
-        "action_shape": [row_count, 18],
+        "action_shape": [row_count, state_dimension],
         "timestamps": "PASS",
         "episode_offsets": "PASS",
         "source_frame_continuity": "PASS",
@@ -311,6 +324,45 @@ def _validate_low_dimensional_data(
         result["subtask_semantics"] = "PASS"
         result["task_and_subtask_progress"] = "PASS"
     return result
+
+
+def _validate_delivery_metadata(
+    root: Path, info: dict[str, Any], export: dict[str, Any]
+) -> dict[str, Any]:
+    manifest = read_json(root / "meta" / "manifest.json")
+    modality = read_json(root / "meta" / "modality.json")
+    state_dimension = int(export.get("state_dimension", 18))
+    if int(manifest.get("state_dimension", -1)) != state_dimension:
+        raise ValueError("delivery manifest state dimension is incorrect")
+    if manifest.get("dataset_id") != export.get("repo_id"):
+        raise ValueError("delivery manifest dataset id is incorrect")
+    if int(manifest.get("total_frames", -1)) != int(export["frames"]):
+        raise ValueError("delivery manifest frame count is incorrect")
+    if int(manifest.get("episode_count", -1)) != int(export["episodes"]):
+        raise ValueError("delivery manifest episode count is incorrect")
+    for key in ("observation.state", "action"):
+        if list(info["features"][key]["shape"]) != [state_dimension]:
+            raise ValueError(f"LeRobot info has an incorrect {key} shape")
+    if state_dimension == 20:
+        expected = {
+            "left_gripper_width": [9],
+            "right_gripper_width": [19],
+        }
+        for section in ("state", "action"):
+            rows = modality.get(section, {})
+            for key, indices in expected.items():
+                if rows.get(key, {}).get("indices") != indices:
+                    raise ValueError(
+                        f"modality {section}.{key} indices are incorrect"
+                    )
+        if manifest.get("gripper_semantics") != "physical_jaw_width_m":
+            raise ValueError("delivery manifest gripper semantics are incorrect")
+    return {
+        "status": "PASS",
+        "manifest": "meta/manifest.json",
+        "modality": "meta/modality.json",
+        "state_dimension": state_dimension,
+    }
 
 
 def _decode_videos(
@@ -391,6 +443,7 @@ def validate_lerobot_dataset(root: Path) -> dict[str, Any]:
     low_dimensional = _validate_low_dimensional_data(
         table, episodes, float(info["fps"]), export
     )
+    delivery_metadata = _validate_delivery_metadata(root, info, export)
 
     video_features = {
         key: feature
@@ -415,6 +468,7 @@ def validate_lerobot_dataset(root: Path) -> dict[str, Any]:
         "validator": "robot-dataset-annotator 0.1.0",
         "format": info["codebase_version"],
         "low_dimensional": low_dimensional,
+        "delivery_metadata": delivery_metadata,
         "videos": videos,
         "artifact_hashes": artifact_hashes,
     }

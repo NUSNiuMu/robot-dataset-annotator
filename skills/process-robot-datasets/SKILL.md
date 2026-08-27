@@ -81,8 +81,9 @@ left/right hand subtask boundaries in original source-frame coordinates. A waiti
 remain `right_hand_wait`; do not relabel it as acquisition or transport merely because the left hand
 is moving.
 
-The adapter exposes synchronized hand poses and marks absent gripper-width fields invalid. A task
-plugin may return multiple ordered candidates in `episodes`; confirm each one against all views.
+The review adapter exposes synchronized hand poses. Gripper width remains absent until export unless
+an explicit wrist-marker calibration is supplied. A task plugin may return multiple ordered
+candidates in `episodes`; confirm each one against all views.
 
 Create a schema-v2 template when needed:
 
@@ -157,11 +158,18 @@ poses to LeRobotDataset v3.0 with explicit paths:
       --review-manifest <review-dir>/manifest.json \
       --annotation-manifest <review-dir>/annotation_manifest.json \
       --decisions <review-dir>/decisions.json --task-spec <task.json> \
+      --gripper-calibration <gripper-calibration.json> \
       --output <dataset-dir> --repo-id <namespace/name>
 
 The adapter refuses an existing output and atomically promotes a temporary directory only after
-LeRobot finalization. Its action is the next-frame dual-hand pose in the source tracking frame;
-provenance must state that it is not robot-retargeted and has no gripper command.
+LeRobot finalization. Without a gripper calibration, its action remains the next-frame 18D
+dual-hand pose and provenance states that no gripper command exists. With an explicit calibration,
+detect each hand camera's two configured ArUco jaw markers, map their center distance to physical
+jaw width, insert width after each 9D hand pose, and export a next-frame 20D action. Require a unique
+detection of both markers; zero-fill and invalidate missing or ambiguous widths instead of guessing.
+Record detection coverage, clipping, calibration parameters, and the calibration hash. Generate
+`meta/manifest.json` and `meta/modality.json` and validate their 20D indices (left width 9, right
+width 19) before delivery.
 The export also carries deterministic left/right subtask IDs, task/subtask progress, the original
 head tracking pose, and the head RGB-camera global pose obtained from the recorded static transform.
 Camera frames use direct streaming encoding by default to avoid temporary PNG disk traffic. If a

@@ -44,7 +44,7 @@ Skill 不保存项目路径；每次新环境首次执行时会要求确认路�
   --observations review/manifest.json --format insight-review
 ```
 
-`insight-review` 适配器从左右手同步位姿构造规范化状态；review manifest 不包含夹爪宽度，
+`insight-review` 适配器从左右手同步位姿构造规范化状态；review manifest 本身不包含夹爪宽度，
 因此对应列保持无效。候选边界始终需要视觉确认，多循环结果位于 `episodes` 数组。
 NPZ 输入包含 `state` 和 `state_valid`；Insight review parquet 可改用
 `--format insight-parquet`。
@@ -165,16 +165,22 @@ Insight MCAP 在完成穷尽审核后可导出为 LeRobotDataset v3.0。导出�
   --annotation-manifest recording/review/annotation_manifest.json \
   --decisions recording/review/decisions.json \
   --task-spec .rda/cup-stacking.json \
+  --gripper-calibration configs/umi-insight3-gripper.json \
   --output outputs/recording-segmented \
   --repo-id local/recording-segmented
 ```
 
-输出包含左右手和头部三路独立视频、18 维双手位姿观测、9 维头部 tracking pose、应用
+输出包含左右手和头部三路独立视频、双手状态、9 维头部 tracking pose、应用
 MCAP 静态外参后的 9 维头部 RGB 相机全局 pose、有效性掩码、源帧索引和原子动作索引。
-`action` 是下一帧双手位姿目标；episode 最后一帧保持当前目标。
-它仍处于源追踪坐标系，未经过机器人重定向且不含夹爪命令，导出清单会显式保留这一限制。
+未传 `--gripper-calibration` 时双手状态维持原有 18D pose。传入标定时，导出器在左右腕图中
+检测 `DICT_4X4_50` 的 0/1 号 marker，把中心像素距离映射为 `0–0.083 m` 的物理开口宽度，
+并在每只手的 9D pose 后插入宽度，形成 20D state/action。只有两个 marker 均唯一检测到时
+宽度才有效；缺失或重复检测保留为零并由 validity mask 标出。端点裁剪、原始距离和检测覆盖率
+均写入审计清单。`action` 是下一帧完整双手状态；episode 最后一帧保持当前状态。pose 仍处于
+源追踪坐标系，且未经过机器人重定向。
 每帧还包含左右手独立 subtask ID、左右手 subtask 内进度和整体操作进度；ID 到英文语义的
-映射写入 `rda/export_manifest.json`。二维码上下文的整体操作进度固定为 0，正式任务区间从
+映射写入 `rda/export_manifest.json`。导出器同时生成 `meta/manifest.json` 和
+`meta/modality.json`，记录维度、夹爪物理语义、标定参数及字段分组。二维码上下文的整体操作进度固定为 0，正式任务区间从
 0 线性增长到 1。
 头部 pose 默认按相机名推断对应的 `<name>_camera_imu` tracking frame；设备命名不符合该规则
 时，导出和二维码标定都应显式传入 `--head-pose-child-frame`。

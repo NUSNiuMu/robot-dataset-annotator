@@ -15,23 +15,37 @@ import numpy as np
 from ..core.decisions import episode_hand_subtask_boundaries, validate_decisions
 from ..core.io import read_json, write_json_atomic
 from ..core.task_spec import TaskSpec
+from .gripper_width import (
+    GripperMeasurement,
+    GripperWidthDetector,
+    load_gripper_calibrations,
+)
 from .insight_frames import head_frame_calibration
 from .pose_coordinates import pose_matrices, pose_state_from_matrices
 
 
+HAND_POSE_COMPONENTS = (
+    "x_m",
+    "y_m",
+    "z_m",
+    "rotation_6d_0",
+    "rotation_6d_1",
+    "rotation_6d_2",
+    "rotation_6d_3",
+    "rotation_6d_4",
+    "rotation_6d_5",
+)
+HAND_POSE_NAMES = tuple(
+    f"{hand}.{component}"
+    for hand in ("left_hand", "right_hand")
+    for component in HAND_POSE_COMPONENTS
+)
 HAND_STATE_NAMES = tuple(
     f"{hand}.{component}"
     for hand in ("left_hand", "right_hand")
     for component in (
-        "x_m",
-        "y_m",
-        "z_m",
-        "rotation_6d_0",
-        "rotation_6d_1",
-        "rotation_6d_2",
-        "rotation_6d_3",
-        "rotation_6d_4",
-        "rotation_6d_5",
+        *HAND_POSE_COMPONENTS,
+        "gripper_width_m",
     )
 )
 HEAD_STATE_NAMES = tuple(
@@ -73,6 +87,8 @@ class FramePlan:
 
 @dataclass(frozen=True)
 class CameraSpec:
+    name: str
+    role: str
     key: str
     topic: str
     width: int
@@ -300,6 +316,8 @@ def _camera_specs(manifest: dict[str, Any]) -> tuple[CameraSpec, ...]:
         row = rows[0]
         specs.append(
             CameraSpec(
+                name=str(row.get("name", role)),
+                role=role,
                 key=f"observation.images.{role}",
                 topic=str(row["topic"]),
                 width=int(row["source_width"]),
@@ -442,17 +460,21 @@ def _stream_synchronized_images(
     return result
 
 
-def _features(cameras: tuple[CameraSpec, ...]) -> dict[str, dict[str, Any]]:
+def _features(
+    cameras: tuple[CameraSpec, ...], *, include_gripper: bool = False
+) -> dict[str, dict[str, Any]]:
+    hand_names = HAND_STATE_NAMES if include_gripper else HAND_POSE_NAMES
+    hand_dimension = len(hand_names)
     result: dict[str, dict[str, Any]] = {
         "observation.state": {
             "dtype": "float32",
-            "shape": (18,),
-            "names": list(HAND_STATE_NAMES),
+            "shape": (hand_dimension,),
+            "names": list(hand_names),
         },
         "observation.state_valid": {
             "dtype": "uint8",
-            "shape": (18,),
-            "names": list(HAND_STATE_NAMES),
+            "shape": (hand_dimension,),
+            "names": list(hand_names),
         },
         "observation.head_pose": {
             "dtype": "float32",
@@ -476,13 +498,13 @@ def _features(cameras: tuple[CameraSpec, ...]) -> dict[str, dict[str, Any]]:
         },
         "action": {
             "dtype": "float32",
-            "shape": (18,),
-            "names": list(HAND_STATE_NAMES),
+            "shape": (hand_dimension,),
+            "names": list(hand_names),
         },
         "action_is_valid": {
             "dtype": "uint8",
-            "shape": (18,),
-            "names": list(HAND_STATE_NAMES),
+            "shape": (hand_dimension,),
+            "names": list(hand_names),
         },
         "annotation.source_frame_index": {
             "dtype": "int64",
@@ -529,6 +551,163 @@ def _features(cameras: tuple[CameraSpec, ...]) -> dict[str, dict[str, Any]]:
     return result
 
 
+def _with_gripper(
+    pose: np.ndarray,
+    pose_valid: np.ndarray,
+    measurements: dict[str, GripperMeasurement],
+) -> tuple[np.ndarray, np.ndarray]:
+    if pose.shape != (18,) or pose_valid.shape != (18,):
+        raise ValueError("dual-hand pose and validity must both have shape (18,)")
+    values: list[np.ndarray] = []
+    valid: list[np.ndarray] = []
+    for offset, role in ((0, "left_hand"), (9, "right_hand")):
+        measurement = measurements[role]
+        values.extend(
+            (
+                pose[offset : offset + 9],
+                np.asarray([measurement.width_m], dtype=np.float32),
+            )
+        )
+        valid.extend(
+            (
+                pose_valid[offset : offset + 9],
+                np.asarray([measurement.valid], dtype=bool),
+            )
+        )
+    state = np.concatenate(values).astype(np.float32, copy=False)
+    state_valid = np.concatenate(valid)
+    state[~state_valid] = 0.0
+    return state, state_valid
+
+
+def _modality_metadata(
+    cameras: tuple[CameraSpec, ...], *, include_gripper: bool
+) -> dict[str, Any]:
+    state: dict[str, Any] = {
+        "left_end_effector_position": {
+            "original_key": "observation.state",
+            "indices": [0, 1, 2],
+            "unit": "m",
+        },
+        "left_end_effector_rotation_6d": {
+            "original_key": "observation.state",
+            "indices": [3, 4, 5, 6, 7, 8],
+            "unit": "rotation_6d",
+        },
+    }
+    action: dict[str, Any] = {
+        "left_end_effector_position": {
+            "original_key": "action",
+            "indices": [0, 1, 2],
+            "unit": "m",
+        },
+        "left_end_effector_rotation_6d": {
+            "original_key": "action",
+            "indices": [3, 4, 5, 6, 7, 8],
+            "unit": "rotation_6d",
+        },
+    }
+    right_offset = 10 if include_gripper else 9
+    if include_gripper:
+        state["left_gripper_width"] = {
+            "original_key": "observation.state",
+            "indices": [9],
+            "unit": "m",
+            "semantics": "physical_jaw_width_m",
+        }
+        action["left_gripper_width"] = {
+            "original_key": "action",
+            "indices": [9],
+            "unit": "m",
+            "semantics": "next_frame_physical_jaw_width_m",
+        }
+    for target in (state, action):
+        original_key = "observation.state" if target is state else "action"
+        target["right_end_effector_position"] = {
+            "original_key": original_key,
+            "indices": list(range(right_offset, right_offset + 3)),
+            "unit": "m",
+        }
+        target["right_end_effector_rotation_6d"] = {
+            "original_key": original_key,
+            "indices": list(range(right_offset + 3, right_offset + 9)),
+            "unit": "rotation_6d",
+        }
+    if include_gripper:
+        state["right_gripper_width"] = {
+            "original_key": "observation.state",
+            "indices": [19],
+            "unit": "m",
+            "semantics": "physical_jaw_width_m",
+        }
+        action["right_gripper_width"] = {
+            "original_key": "action",
+            "indices": [19],
+            "unit": "m",
+            "semantics": "next_frame_physical_jaw_width_m",
+        }
+    return {
+        "state": state,
+        "action": action,
+        "video": {
+            camera.role: {
+                "original_key": camera.key,
+                "source_camera": camera.name,
+            }
+            for camera in cameras
+        },
+        "annotation": {
+            "task": {
+                "original_key": "task_index",
+                "metadata": "meta/tasks.parquet",
+            },
+            "source_frame_index": {
+                "original_key": "annotation.source_frame_index"
+            },
+            "atomic_action_index": {
+                "original_key": "annotation.atomic_action_index"
+            },
+        },
+    }
+
+
+def _dataset_manifest(
+    *,
+    repo_id: str,
+    task: TaskSpec,
+    episodes: int,
+    frames: int,
+    fps: float,
+    include_gripper: bool,
+    gripper_audit: dict[str, Any] | None,
+    calibration_payload: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "format": "lerobot_v3_hifi_umi_dual_arm",
+        "dataset_id": repo_id,
+        "episode_count": episodes,
+        "total_frames": frames,
+        "duration_s": frames / fps,
+        "fps": fps,
+        "task": task.description,
+        "task_id": task.task_id,
+        "state_dimension": 20 if include_gripper else 18,
+        "action_semantics": "absolute_next_state",
+        "gripper_semantics": (
+            "physical_jaw_width_m" if include_gripper else None
+        ),
+        "video_keys": [
+            "observation.images.left_hand",
+            "observation.images.right_hand",
+            "observation.images.head",
+        ],
+        "validity_masks": ["observation.state_valid", "action_is_valid"],
+        "gripper_calibration": calibration_payload if include_gripper else None,
+        "gripper_detection": gripper_audit if include_gripper else None,
+    }
+
+
 def export_insight_lerobot(
     *,
     source: Path,
@@ -542,6 +721,7 @@ def export_insight_lerobot(
     vcodec: str = "h264",
     head_pose_child_frame: str | None = None,
     head_static_calibration_source: Path | None = None,
+    gripper_calibration_path: Path | None = None,
     streaming_video_encoding: bool = True,
     encoder_queue_maxsize: int = 256,
     encoder_threads: int = 2,
@@ -568,6 +748,24 @@ def export_insight_lerobot(
         head_pose_from_camera=head_calibration["tracking_from_camera"],
     )
     cameras = _camera_specs(review_manifest)
+    calibration_payload = None
+    detectors: dict[str, GripperWidthDetector] = {}
+    if gripper_calibration_path is not None:
+        calibrations, calibration_payload = load_gripper_calibrations(
+            gripper_calibration_path
+        )
+        for camera in cameras:
+            if camera.role not in {"left_hand", "right_hand"}:
+                continue
+            calibration = calibrations.get(camera.name)
+            if calibration is None:
+                raise ValueError(
+                    f"no gripper calibration for source camera {camera.name!r}"
+                )
+            detectors[camera.role] = GripperWidthDetector(calibration)
+    include_gripper = bool(detectors)
+    if include_gripper and set(detectors) != {"left_hand", "right_hand"}:
+        raise ValueError("gripper calibration must cover both hand cameras")
     fps = float(review_manifest["fps"])
     if fps <= 0:
         raise ValueError("review manifest fps must be positive")
@@ -598,7 +796,7 @@ def export_insight_lerobot(
             fps=round(fps),
             root=temporary,
             robot_type="human_hand_tracking",
-            features=_features(cameras),
+            features=_features(cameras, include_gripper=include_gripper),
             use_videos=True,
             image_writer_threads=0 if streaming_video_encoding else 4,
             vcodec=vcodec,
@@ -607,18 +805,47 @@ def export_insight_lerobot(
             encoder_threads=encoder_threads,
         )
         images: dict[int, dict[str, np.ndarray]] = {}
+        grippers: dict[int, dict[str, GripperMeasurement]] = {}
+        camera_by_key = {camera.key: camera for camera in cameras}
         next_to_write = 0
 
         def flush_ready() -> None:
             nonlocal next_to_write
-            while (
-                next_to_write < len(plans)
-                and len(images.get(next_to_write, {})) == len(cameras)
-            ):
+            while next_to_write < len(plans):
+                if len(images.get(next_to_write, {})) != len(cameras):
+                    break
                 plan = plans[next_to_write]
+                target_index = next_to_write
+                if (
+                    next_to_write + 1 < len(plans)
+                    and plans[next_to_write + 1].episode_index == plan.episode_index
+                ):
+                    target_index += 1
+                if include_gripper and (
+                    set(grippers.get(next_to_write, {}))
+                    != {"left_hand", "right_hand"}
+                    or set(grippers.get(target_index, {}))
+                    != {"left_hand", "right_hand"}
+                ):
+                    break
+                state = plan.state
+                state_valid = plan.state_valid
+                action = plan.action
+                action_valid = plan.action_valid
+                if include_gripper:
+                    state, state_valid = _with_gripper(
+                        plan.state,
+                        plan.state_valid,
+                        grippers[next_to_write],
+                    )
+                    action, action_valid = _with_gripper(
+                        plan.action,
+                        plan.action_valid,
+                        grippers[target_index],
+                    )
                 frame: dict[str, Any] = {
-                    "observation.state": plan.state,
-                    "observation.state_valid": plan.state_valid.astype(np.uint8),
+                    "observation.state": state,
+                    "observation.state_valid": state_valid.astype(np.uint8),
                     "observation.head_pose": plan.head_pose,
                     "observation.head_camera_pose_global": (
                         plan.head_camera_pose_global
@@ -629,8 +856,8 @@ def export_insight_lerobot(
                     "observation.head_pose_valid": plan.head_pose_valid.astype(
                         np.uint8
                     ),
-                    "action": plan.action,
-                    "action_is_valid": plan.action_valid.astype(np.uint8),
+                    "action": action,
+                    "action_is_valid": action_valid.astype(np.uint8),
                     "annotation.source_frame_index": np.asarray(
                         [plan.source_frame], dtype=np.int64
                     ),
@@ -661,10 +888,16 @@ def export_insight_lerobot(
                 )
                 if is_episode_end:
                     dataset.save_episode(parallel_encoding=True)
+                grippers.pop(next_to_write, None)
                 next_to_write += 1
 
         def emit(index: int, key: str, image: np.ndarray, stamp_ns: int) -> None:
             images.setdefault(index, {})[key] = image
+            camera = camera_by_key[key]
+            detector = detectors.get(camera.role)
+            if detector is not None:
+                measurement = detector.measure(image)
+                grippers.setdefault(index, {})[camera.role] = measurement
             flush_ready()
 
         synchronization = _stream_synchronized_images(
@@ -676,6 +909,29 @@ def export_insight_lerobot(
                 f"only wrote {next_to_write} of {len(plans)} planned frames"
             )
         dataset.finalize()
+
+        gripper_audit = (
+            {role: detector.audit() for role, detector in detectors.items()}
+            if include_gripper
+            else None
+        )
+        write_json_atomic(
+            temporary / "meta" / "modality.json",
+            _modality_metadata(cameras, include_gripper=include_gripper),
+        )
+        write_json_atomic(
+            temporary / "meta" / "manifest.json",
+            _dataset_manifest(
+                repo_id=repo_id,
+                task=task,
+                episodes=validation.episodes,
+                frames=len(plans),
+                fps=fps,
+                include_gripper=include_gripper,
+                gripper_audit=gripper_audit,
+                calibration_payload=calibration_payload,
+            ),
+        )
 
         action_counts = {
             action.key: sum(plan.atomic_action_index == index for plan in plans)
@@ -706,10 +962,21 @@ def export_insight_lerobot(
             "context_frames": context_frames,
             "subtask_semantics": task.subtask_catalog(),
             "camera_synchronization": synchronization,
+            "state_dimension": 20 if include_gripper else 18,
+            "gripper_semantics": (
+                "physical_jaw_width_m" if include_gripper else None
+            ),
+            "gripper_detection": gripper_audit,
             "action_semantics": (
-                "Next-frame dual-hand 6D pose target in the source tracking frame; "
+                "Next-frame dual-hand 6D pose"
+                + (" and physical gripper-width" if include_gripper else "")
+                + " target in the source tracking frame; "
                 "the final frame repeats the current target. Not robot-retargeted and "
-                "contains no gripper command."
+                + (
+                    "gripper values come from synchronized wrist-camera ArUco markers."
+                    if include_gripper
+                    else "contains no gripper command."
+                )
             ),
             "pose_semantics": {
                 "observation.state": (
@@ -759,6 +1026,11 @@ def export_insight_lerobot(
                 "annotation_manifest_sha256": _sha256(annotation_manifest_path),
                 "decisions_sha256": _sha256(decisions_path),
                 "task_spec_sha256": _sha256(task_path),
+                "gripper_calibration_sha256": (
+                    _sha256(gripper_calibration_path)
+                    if gripper_calibration_path is not None
+                    else None
+                ),
             },
             "pose_drift_correction": review_manifest.get(
                 "pose_drift_correction",

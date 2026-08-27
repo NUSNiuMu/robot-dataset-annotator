@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "semantics": "physical_jaw_width_m",
+  "marker_dictionary": "DICT_4X4_50",
+  "marker_ids": {
+    "left_jaw": 1,
+    "right_jaw": 0
+  },
+  "physical_width_m": {
+    "closed": 0.0,
+    "open": 0.083
+  },
+  "cameras": {
+    "insight3_a": {
+      "reference_width_px": 544,
+      "closed_distance_px": 54.546,
+      "open_distance_px": 247.284,
+      "calibration_source": "previous_umi_dataset_calibration"
+    },
+    "insight3_b": {
+      "reference_width_px": 544,
+      "closed_distance_px": 54.546,
+      "open_distance_px": 247.284,
+      "calibration_source": "previous_umi_dataset_calibration"
+    }
+  }
+}

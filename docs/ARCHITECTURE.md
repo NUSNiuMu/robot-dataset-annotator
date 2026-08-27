@@ -37,6 +37,12 @@ review manifest，视频来自原始相机消息；动作语义、同步误差�
 省去逐帧 PNG 暂存；兼容模式仍可使用 PNG 分阶段编码。导出器当前只接受单 source segment，
 避免把多个独立时间轴静默拼接。
 
+可选的 `--gripper-calibration` 在适配器边界内从左右腕 RGB 帧检测 ArUco 0/1 marker。
+像素中心距离按相机名选择标定，再映射到统一的物理夹爪宽度；左右各 9D pose 后插入宽度形成
+20D state，action 使用同一 episode 下一帧的完整 20D 状态。检测缺失或同一 ID 重复时不猜测，
+该维度保持零并标记 invalid；检测覆盖率、裁剪和原始距离统计写入 provenance。导出器始终写
+`meta/manifest.json` 与 `meta/modality.json`，记录维度、物理语义和字段分组。
+
 头部 review pose 是 tracking frame 的全局 pose。导出器读取 MCAP 的 `tf_static` 和彩色相机
 `CameraInfo`，沿静态坐标树计算 tracking frame 到 RGB 相机的外参，额外输出
 `observation.head_camera_pose_global` 及其有效性掩码。原有 `observation.head_pose` 保留，
@@ -62,7 +68,8 @@ SE(3) 上插值；短时、同方向且累计位移明显不可能的渐进漂�
 包含实际修正时才可能标记 `PASS_AFTER_CORRECTION`。
 
 `adapters/lerobot_validation.py` 先直接检查 Parquet 的 row、episode、timestamp、source
-frame、原子动作、有效性和 next-frame action 不变量，再完整解码每一个视频文件。随后用
+frame、18D/20D 状态、物理夹爪非负性、有效性和 next-frame action 不变量，并核对
+`meta/manifest.json` 与 `meta/modality.json`，再完整解码每一个视频文件。随后用
 官方 `LeRobotDataset` 做代表性索引并通过 PyTorch DataLoader 读取一个 batch；两个阶段分别
 写独立 PASS 证据，官方检查失败时不会伪造完成状态。
 Python 3.10 验证环境的直接版本锁定位于 `configs/lerobot-validator-py310.txt`，不得把这组
