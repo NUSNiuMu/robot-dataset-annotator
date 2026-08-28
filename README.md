@@ -174,10 +174,12 @@ Insight MCAP 在完成穷尽审核后可导出为 LeRobotDataset v3.0。导出�
 MCAP 静态外参后的 9 维头部 RGB 相机全局 pose、有效性掩码、源帧索引和原子动作索引。
 未传 `--gripper-calibration` 时双手状态维持原有 18D pose。传入标定时，导出器在左右腕图中
 检测 `DICT_4X4_50` 的 0/1 号 marker，把中心像素距离映射为 `0–0.083 m` 的物理开口宽度，
-并在每只手的 9D pose 后插入宽度，形成 20D state/action。只有两个 marker 均唯一检测到时
-宽度才有效；缺失或重复检测保留为零并由 validity mask 标出。端点裁剪、原始距离和检测覆盖率
-均写入审计清单。`action` 是下一帧完整双手状态；episode 最后一帧保持当前状态。pose 仍处于
-源追踪坐标系，且未经过机器人重定向。
+并在每只手的 9D pose 后插入宽度，形成 20D state/action。两个 marker 均唯一检测到时直接
+测量；配置显式的 `symmetric_midpoint` 单 marker 推算和参考图像高度后，可在仅一侧 marker
+唯一可见且图像纵横比匹配时，按对称中点恢复总距离。重复、全缺失或几何不匹配仍保留为零并
+由 validity mask 标出。direct/inferred 帧数、推算所用 marker、成对中点误差、端点裁剪、
+原始距离和检测覆盖率均写入审计清单。`action` 是下一帧完整双手状态；episode 最后一帧保持
+当前状态。pose 仍处于源追踪坐标系，且未经过机器人重定向。
 每帧还包含左右手独立 subtask ID、左右手 subtask 内进度和整体操作进度；ID 到英文语义的
 映射写入 `rda/export_manifest.json`。导出器同时生成 `meta/manifest.json` 和
 `meta/modality.json`，记录维度、夹爪物理语义、标定参数及字段分组。二维码上下文的整体操作进度固定为 0，正式任务区间从
@@ -227,6 +229,10 @@ skills/          可随仓库复制或安装的标准 Codex Skill
 
 架构约束和新增任务流程见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 与
 [docs/ADDING_TASK.md](docs/ADDING_TASK.md)。
+
+内置 `screw-nut-sorting` 以“一整批混合件分类完成”为 episode：固定左盒放螺母、固定右盒
+放螺丝，同一录制中的人工重新摆料只作为多 episode 之间的间隔。第一版不提供自动分段插件，
+必须人工确认每轮完整性、分类正确性以及左右夹爪各自的分类和撤离边界。
 
 仓库自动化开发约束见 [AGENTS.md](AGENTS.md)；`CLAUDE.md` 与其同步并一同提交。代码行为、
 命令、schema 或 Skill 发生变化时，必须同步文档、运行测试、提交并推送当前分支。

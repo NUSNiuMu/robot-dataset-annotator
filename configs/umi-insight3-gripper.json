@@ -13,15 +13,27 @@
   "cameras": {
     "insight3_a": {
       "reference_width_px": 544,
+      "reference_height_px": 640,
       "closed_distance_px": 54.546,
       "open_distance_px": 247.284,
-      "calibration_source": "previous_umi_dataset_calibration"
+      "calibration_source": "previous_umi_dataset_calibration",
+      "single_marker_inference": {
+        "method": "symmetric_midpoint",
+        "marker_midpoint_px": [315.64, 543.68],
+        "calibration_source": "screw_nut_sorting_20260828_paired_marker_median"
+      }
     },
     "insight3_b": {
       "reference_width_px": 544,
+      "reference_height_px": 640,
       "closed_distance_px": 54.546,
       "open_distance_px": 247.284,
-      "calibration_source": "previous_umi_dataset_calibration"
+      "calibration_source": "previous_umi_dataset_calibration",
+      "single_marker_inference": {
+        "method": "symmetric_midpoint",
+        "marker_midpoint_px": [297.7, 487.64],
+        "calibration_source": "screw_nut_sorting_20260828_paired_marker_median"
+      }
     }
   }
 }

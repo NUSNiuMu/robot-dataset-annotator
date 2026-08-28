@@ -1,0 +1,43 @@
+{
+  "task_id": "screw-nut-sorting",
+  "description": "Use both grippers to sort one batch of mixed nuts and screws, placing nuts in the fixed left box and screws in the fixed right box.",
+  "minimum_segment_frames": 10,
+  "hand_subtasks": {
+    "left_hand": [
+      {
+        "key": "left_hand_sort_items",
+        "label": "left_hand_sort_mixed_nuts_and_screws",
+        "instruction": "With the left gripper, repeatedly select and place visible nuts in the fixed left box and visible screws in the fixed right box."
+      },
+      {
+        "key": "left_hand_finish_retreat",
+        "label": "left_hand_finish_and_retreat_after_batch",
+        "instruction": "After the left gripper has no remaining item to sort, wait without disturbing the other gripper and retreat when the batch is complete."
+      }
+    ],
+    "right_hand": [
+      {
+        "key": "right_hand_sort_items",
+        "label": "right_hand_sort_mixed_nuts_and_screws",
+        "instruction": "With the right gripper, repeatedly select and place visible nuts in the fixed left box and visible screws in the fixed right box."
+      },
+      {
+        "key": "right_hand_finish_retreat",
+        "label": "right_hand_finish_and_retreat_after_batch",
+        "instruction": "After the right gripper has no remaining item to sort, wait without disturbing the other gripper and retreat when the batch is complete."
+      }
+    ]
+  },
+  "atomic_actions": [
+    {
+      "key": "sort_batch",
+      "label": "sort_mixed_nuts_and_screws_into_fixed_boxes",
+      "instruction": "Use both grippers concurrently to sort the entire mixed batch, placing every nut in the fixed left box and every screw in the fixed right box."
+    },
+    {
+      "key": "complete_retreat",
+      "label": "confirm_batch_complete_and_retreat",
+      "instruction": "After the final item is released, leave no item in the central workspace, keep both boxes correctly sorted, and retreat both grippers before any human reset."
+    }
+  ]
+}

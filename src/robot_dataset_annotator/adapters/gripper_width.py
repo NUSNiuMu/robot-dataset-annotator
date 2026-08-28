@@ -20,6 +20,8 @@ class GripperCalibration:
     open_distance_px: float
     closed_width_m: float
     open_width_m: float
+    reference_height_px: int | None = None
+    symmetric_marker_midpoint_px: tuple[float, float] | None = None
 
     def width_from_distance(
         self, distance_px: float, image_width_px: int
@@ -74,6 +76,38 @@ def load_gripper_calibrations(
     for camera_name, row in cameras.items():
         if not isinstance(row, dict):
             raise ValueError(f"invalid calibration for camera {camera_name!r}")
+        inference = row.get("single_marker_inference")
+        if inference is not None and not isinstance(inference, dict):
+            raise ValueError(
+                f"{camera_name} single_marker_inference must be an object"
+            )
+        reference_height = (
+            int(row["reference_height_px"])
+            if row.get("reference_height_px") is not None
+            else None
+        )
+        symmetric_midpoint = None
+        if inference is not None:
+            if inference.get("method") != "symmetric_midpoint":
+                raise ValueError(
+                    f"{camera_name} single_marker_inference method must be "
+                    "symmetric_midpoint"
+                )
+            midpoint = inference.get("marker_midpoint_px")
+            if not isinstance(midpoint, list) or len(midpoint) != 2:
+                raise ValueError(
+                    f"{camera_name} marker_midpoint_px must contain x and y"
+                )
+            if not all(np.isfinite(float(value)) for value in midpoint):
+                raise ValueError(
+                    f"{camera_name} marker_midpoint_px must be finite"
+                )
+            if reference_height is None or reference_height <= 0:
+                raise ValueError(
+                    f"{camera_name} symmetric inference requires a positive "
+                    "reference_height_px"
+                )
+            symmetric_midpoint = tuple(float(value) for value in midpoint)
         calibration = GripperCalibration(
             camera_name=str(camera_name),
             marker_dictionary=marker_dictionary,
@@ -84,6 +118,8 @@ def load_gripper_calibrations(
             open_distance_px=float(row["open_distance_px"]),
             closed_width_m=float(physical["closed"]),
             open_width_m=float(physical["open"]),
+            reference_height_px=reference_height,
+            symmetric_marker_midpoint_px=symmetric_midpoint,
         )
         if calibration.reference_width_px <= 0:
             raise ValueError(f"{camera_name} reference width must be positive")
@@ -124,11 +160,37 @@ class GripperWidthDetector:
         self._parameters = parameters
         self._frames = 0
         self._valid_frames = 0
+        self._direct_frames = 0
+        self._symmetric_inferred_frames = 0
+        self._inferred_from_marker = {
+            calibration.left_marker_id: 0,
+            calibration.right_marker_id: 0,
+        }
+        self._single_marker_frames = 0
         self._missing_frames = 0
         self._ambiguous_frames = 0
+        self._symmetry_geometry_mismatch_frames = 0
         self._clipped_low = 0
         self._clipped_high = 0
         self._distances: list[float] = []
+        self._direct_distances: list[float] = []
+        self._inferred_distances: list[float] = []
+        self._midpoint_errors: list[float] = []
+
+    def _scaled_symmetric_midpoint(
+        self, image: np.ndarray
+    ) -> np.ndarray | None:
+        midpoint = self.calibration.symmetric_marker_midpoint_px
+        reference_height = self.calibration.reference_height_px
+        if midpoint is None or reference_height is None:
+            return None
+        scale_x = image.shape[1] / self.calibration.reference_width_px
+        scale_y = image.shape[0] / reference_height
+        if not np.isclose(scale_x, scale_y, rtol=0.01, atol=1e-9):
+            return None
+        return np.asarray(
+            [midpoint[0] * scale_x, midpoint[1] * scale_y], dtype=np.float64
+        )
 
     def measure(self, image: np.ndarray) -> GripperMeasurement:
         if image.ndim != 3 or image.shape[2] != 3:
@@ -157,24 +219,56 @@ class GripperWidthDetector:
             marker_id: len(centers.get(marker_id, [])) for marker_id in marker_ids
         }
         self._frames += 1
-        if any(count == 0 for count in counts.values()):
-            self._missing_frames += 1
-            return GripperMeasurement(0.0, False, None, counts)
-        if any(count != 1 for count in counts.values()):
+        if any(count > 1 for count in counts.values()):
             self._ambiguous_frames += 1
             return GripperMeasurement(0.0, False, None, counts)
 
-        distance = float(
-            np.linalg.norm(
-                centers[self.calibration.left_marker_id][0]
-                - centers[self.calibration.right_marker_id][0]
+        visible = [marker_id for marker_id in marker_ids if counts[marker_id] == 1]
+        inferred = False
+        if len(visible) == 2:
+            distance = float(
+                np.linalg.norm(
+                    centers[self.calibration.left_marker_id][0]
+                    - centers[self.calibration.right_marker_id][0]
+                )
             )
-        )
+            symmetric_midpoint = self._scaled_symmetric_midpoint(image)
+            if symmetric_midpoint is not None:
+                observed_midpoint = (
+                    centers[self.calibration.left_marker_id][0]
+                    + centers[self.calibration.right_marker_id][0]
+                ) / 2.0
+                self._midpoint_errors.append(
+                    float(np.linalg.norm(observed_midpoint - symmetric_midpoint))
+                )
+        elif len(visible) == 1:
+            self._single_marker_frames += 1
+            symmetric_midpoint = self._scaled_symmetric_midpoint(image)
+            if symmetric_midpoint is None:
+                if self.calibration.symmetric_marker_midpoint_px is not None:
+                    self._symmetry_geometry_mismatch_frames += 1
+                self._missing_frames += 1
+                return GripperMeasurement(0.0, False, None, counts)
+            marker_id = visible[0]
+            distance = 2.0 * float(
+                np.linalg.norm(centers[marker_id][0] - symmetric_midpoint)
+            )
+            inferred = True
+            self._inferred_from_marker[marker_id] += 1
+        else:
+            self._missing_frames += 1
+            return GripperMeasurement(0.0, False, None, counts)
         width, clipped = self.calibration.width_from_distance(
             distance, int(image.shape[1])
         )
         self._valid_frames += 1
         self._distances.append(distance)
+        if inferred:
+            self._symmetric_inferred_frames += 1
+            self._inferred_distances.append(distance)
+        else:
+            self._direct_frames += 1
+            self._direct_distances.append(distance)
         if clipped == "low":
             self._clipped_low += 1
         elif clipped == "high":
@@ -183,6 +277,17 @@ class GripperWidthDetector:
 
     def audit(self) -> dict[str, Any]:
         distances = np.asarray(self._distances, dtype=np.float64)
+        direct_distances = np.asarray(self._direct_distances, dtype=np.float64)
+        inferred_distances = np.asarray(self._inferred_distances, dtype=np.float64)
+        midpoint_errors = np.asarray(self._midpoint_errors, dtype=np.float64)
+
+        def distance_summary(values: np.ndarray) -> dict[str, float | None]:
+            return {
+                "min": float(values.min()) if values.size else None,
+                "median": float(np.median(values)) if values.size else None,
+                "max": float(values.max()) if values.size else None,
+            }
+
         return {
             "camera_name": self.calibration.camera_name,
             "frames": self._frames,
@@ -190,20 +295,35 @@ class GripperWidthDetector:
             "valid_fraction": (
                 self._valid_frames / self._frames if self._frames else 0.0
             ),
+            "direct_paired_marker_frames": self._direct_frames,
+            "symmetric_inferred_frames": self._symmetric_inferred_frames,
+            "single_marker_frames": self._single_marker_frames,
+            "inferred_from_marker_frames": {
+                str(marker_id): count
+                for marker_id, count in self._inferred_from_marker.items()
+            },
             "missing_marker_frames": self._missing_frames,
             "ambiguous_marker_frames": self._ambiguous_frames,
+            "symmetry_geometry_mismatch_frames": (
+                self._symmetry_geometry_mismatch_frames
+            ),
             "clipped_low_frames": self._clipped_low,
             "clipped_high_frames": self._clipped_high,
-            "raw_distance_px": {
-                "min": float(distances.min()) if distances.size else None,
-                "median": float(np.median(distances)) if distances.size else None,
-                "max": float(distances.max()) if distances.size else None,
-            },
+            "raw_distance_px": distance_summary(distances),
+            "direct_raw_distance_px": distance_summary(direct_distances),
+            "inferred_raw_distance_px": distance_summary(inferred_distances),
+            "paired_midpoint_error_px": distance_summary(midpoint_errors),
             "calibration": {
                 "reference_width_px": self.calibration.reference_width_px,
+                "reference_height_px": self.calibration.reference_height_px,
                 "closed_distance_px": self.calibration.closed_distance_px,
                 "open_distance_px": self.calibration.open_distance_px,
                 "closed_width_m": self.calibration.closed_width_m,
                 "open_width_m": self.calibration.open_width_m,
+                "symmetric_marker_midpoint_px": (
+                    list(self.calibration.symmetric_marker_midpoint_px)
+                    if self.calibration.symmetric_marker_midpoint_px is not None
+                    else None
+                ),
             },
         }

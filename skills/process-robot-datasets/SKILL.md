@@ -81,6 +81,13 @@ left/right hand subtask boundaries in original source-frame coordinates. A waiti
 remain `right_hand_wait`; do not relabel it as acquisition or transport merely because the left hand
 is moving.
 
+`screw-nut-sorting` also intentionally requires manual boundaries. Treat one complete mixed batch as
+an episode: nuts go in the fixed left box and screws in the fixed right box. Do not split overlapping
+left/right single-item cycles into separate episodes. End the sorting phase at the final release, keep
+the subsequent completion and retreat phase, exclude human reset intervals, and independently mark
+when each gripper stops sorting and waits or retreats. Human intervention, a wrong box, an item outside
+both boxes, or an item left in the central workspace prevents a PASS episode.
+
 The review adapter exposes synchronized hand poses. Gripper width remains absent until export unless
 an explicit wrist-marker calibration is supplied. A task plugin may return multiple ordered
 candidates in `episodes`; confirm each one against all views.
@@ -166,8 +173,12 @@ LeRobot finalization. Without a gripper calibration, its action remains the next
 dual-hand pose and provenance states that no gripper command exists. With an explicit calibration,
 detect each hand camera's two configured ArUco jaw markers, map their center distance to physical
 jaw width, insert width after each 9D hand pose, and export a next-frame 20D action. Require a unique
-detection of both markers; zero-fill and invalidate missing or ambiguous widths instead of guessing.
-Record detection coverage, clipping, calibration parameters, and the calibration hash. Generate
+detection of both markers for direct measurement. A calibration may explicitly define a symmetric
+marker midpoint and reference image geometry; when exactly one jaw marker is unique, infer the total
+distance as twice its distance from that midpoint. Never enable this fallback without calibration,
+and invalidate ambiguous, fully missing, or geometry-mismatched frames. Record direct and inferred
+coverage, the visible marker used for inference, paired-midpoint error, clipping, calibration
+parameters, and the calibration hash. Generate
 `meta/manifest.json` and `meta/modality.json` and validate their 20D indices (left width 9, right
 width 19) before delivery.
 The export also carries deterministic left/right subtask IDs, task/subtask progress, the original

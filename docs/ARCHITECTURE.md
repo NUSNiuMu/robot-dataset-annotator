@@ -39,9 +39,13 @@ review manifest，视频来自原始相机消息；动作语义、同步误差�
 
 可选的 `--gripper-calibration` 在适配器边界内从左右腕 RGB 帧检测 ArUco 0/1 marker。
 像素中心距离按相机名选择标定，再映射到统一的物理夹爪宽度；左右各 9D pose 后插入宽度形成
-20D state，action 使用同一 episode 下一帧的完整 20D 状态。检测缺失或同一 ID 重复时不猜测，
-该维度保持零并标记 invalid；检测覆盖率、裁剪和原始距离统计写入 provenance。导出器始终写
-`meta/manifest.json` 与 `meta/modality.json`，记录维度、物理语义和字段分组。
+20D state，action 使用同一 episode 下一帧的完整 20D 状态。可选的 `symmetric_midpoint`
+标定为固定腕相机提供参考图像尺寸和两 jaw marker 的对称中点；仅一个 marker 唯一可见时，
+适配器可用该 marker 到中点距离的两倍恢复总距离。该模式必须显式配置，且输入纵横比必须与
+标定匹配。双 marker 可见时仍优先直接测量；重复、全缺失或几何不匹配时保持零并标记
+invalid。检测覆盖率、direct/inferred 来源、成对中点误差、裁剪和原始距离统计写入
+provenance。导出器始终写 `meta/manifest.json` 与 `meta/modality.json`，记录维度、物理语义
+和字段分组。
 
 头部 review pose 是 tracking frame 的全局 pose。导出器读取 MCAP 的 `tf_static` 和彩色相机
 `CameraInfo`，沿静态坐标树计算 tracking frame 到 RGB 相机的外参，额外输出
