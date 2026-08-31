@@ -88,6 +88,21 @@ the subsequent completion and retreat phase, exclude human reset intervals, and 
 when each gripper stops sorting and waits or retreats. Human intervention, a wrong box, an item outside
 both boxes, or an item left in the central workspace prevents a PASS episode.
 
+After its decisions are valid, `screw-nut-sorting` requires a native-VIO versus Insight-Global audit
+for both hands and for each episode:
+
+    rda audit-insight-episode-poses --source <recording-dir> \
+      --review-manifest <review-dir>/manifest.json \
+      --decisions <review-dir>/decisions.json --task-spec <task.json> \
+      --output <review-dir>/episode_pose_quality_audit.json
+
+Accept a native jump only when Insight Global cancels it at the same frame. A shared Global jump is
+uncorrected; a later alignment update is only partially corrected; missing or discontinuous evidence
+remains `NEEDS_REVIEW`. Evaluate every later episode from its own boundaries, so an earlier drift does
+not invalidate it. Keep rejected source evidence, revise final decisions if necessary, and rerun the
+audit. Desktop-world QR, gripper-state markers, and rear multi-face camera calibration are separate
+evidence and must not replace this temporal comparison.
+
 The review adapter exposes synchronized hand poses. Gripper width remains absent until export unless
 an explicit wrist-marker calibration is supplied. A task plugin may return multiple ordered
 candidates in `episodes`; confirm each one against all views.
@@ -167,6 +182,10 @@ poses to LeRobotDataset v3.0 with explicit paths:
       --decisions <review-dir>/decisions.json --task-spec <task.json> \
       --gripper-calibration <gripper-calibration.json> \
       --output <dataset-dir> --repo-id <namespace/name>
+
+For any task with `episode_pose_quality`, add
+`--episode-pose-audit <review-dir>/episode_pose_quality_audit.json`. Export must stop unless the audit
+is `PASS`, every selected episode is usable, and its manifest, decisions, and task-spec hashes match.
 
 The adapter refuses an existing output and atomically promotes a temporary directory only after
 LeRobot finalization. Without a gripper calibration, its action remains the next-frame 18D

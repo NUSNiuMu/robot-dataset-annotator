@@ -27,6 +27,8 @@ git log origin/main..HEAD --oneline
   变换落盘后，最终训练 decisions 可按任务要求省略该 context。
 - 左右手训练子语义必须独立审核；短 pose 尖峰、持续坐标跳变及其稳定残余跳变只能写入保留
   原始值与审计证据的新 manifest，模糊的首次跳变必须返回 `NEEDS_REVIEW`。
+- `screw-nut-sorting` 必须逐 episode 对比双手 native VIO 与 Insight Global；只允许同帧全局
+  抵消的漂移通过，延迟或缺失修正必须复核，且不得把前一 episode 的结论传播到后续 episode。
 - LeRobot 工作数据集保留 `rda/` 验证证据；严格交付副本只复制 schema 实际引用的官方
   数据目录，以及任务明确要求的不可变标定 sidecar（例如 `qr_transform.json`）。仅在确认根目录
   `images/` 不含文件时，才可省略官方写入器遗留的空目录骨架。

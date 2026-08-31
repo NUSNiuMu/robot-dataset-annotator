@@ -30,6 +30,14 @@ episode 可选的 `context_start_frame` 允许保留正式任务开始前的连�
 插件可以返回单个候选，也可以返回同一源片段中的多个有序 episode 候选；core decisions
 始终使用源片段帧坐标验证覆盖、顺序和最短动作长度。
 
+任务可通过 `episode_pose_quality` 声明逐 episode 的 pose 质量插件。Insight 适配器负责从
+ROS 2 bag 读取 native VIO 与 Insight Global、按 header 时间配对并重采样到 review 时间轴；
+`tasks/screw_nut_sorting/pose_quality.py` 只接收规范化矩阵，判断 native 跳变是否被 Global
+同帧抵消。Global 也跳变且未修正、延迟修正、数据缺口或对齐变换不连续均返回
+`NEEDS_REVIEW`。episode 边界外的事件不会进入当前轮次，因此重置间隔或前一轮漂移不会污染
+后续 episode。导出门校验审计与 manifest、decisions、task spec 的哈希，且只接受所有待导出
+episode 均为 `training_usable=true` 的 `PASS` 审计；它不修改 pose，也不自动删除源数据。
+
 `adapters/lerobot_export.py` 是可选依赖边界：它延迟导入 ROS、OpenCV 和 LeRobot，按审核
 时间轴对 MCAP 三路相机做最近邻同步，并只导出 decisions 接受的帧。低维观测来自已同步的
 review manifest，视频来自原始相机消息；动作语义、同步误差、输入哈希和 LeRobot 版本写入

@@ -119,6 +119,27 @@ def _suggest(args: argparse.Namespace) -> int:
 
 
 def _export_lerobot(args: argparse.Namespace) -> int:
+    task_path = args.task_spec.expanduser().resolve()
+    task = TaskSpec.load(task_path)
+    if task.episode_pose_quality is not None and args.episode_pose_audit is None:
+        raise SystemExit(
+            f"task {task.task_id} requires --episode-pose-audit before export"
+        )
+    if args.episode_pose_audit is not None:
+        from .core.episode_pose_quality import (
+            validate_episode_pose_audit_for_export,
+        )
+
+        try:
+            validate_episode_pose_audit_for_export(
+                args.episode_pose_audit.expanduser().resolve(),
+                review_manifest_path=args.review_manifest.expanduser().resolve(),
+                decisions_path=args.decisions.expanduser().resolve(),
+                task_path=task_path,
+            )
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+
     from .adapters.lerobot_export import export_insight_lerobot
 
     result = export_insight_lerobot(
@@ -126,7 +147,7 @@ def _export_lerobot(args: argparse.Namespace) -> int:
         review_manifest_path=args.review_manifest.expanduser().resolve(),
         annotation_manifest_path=args.annotation_manifest.expanduser().resolve(),
         decisions_path=args.decisions.expanduser().resolve(),
-        task_path=args.task_spec.expanduser().resolve(),
+        task_path=task_path,
         output=args.output.expanduser().resolve(),
         repo_id=args.repo_id,
         max_skew_ms=args.max_skew_ms,
@@ -193,6 +214,22 @@ def _correct_pose_drift(args: argparse.Namespace) -> int:
         audit_path=args.audit.expanduser().resolve(),
         maximum_spike_frames=args.maximum_spike_frames,
         maximum_drift_transition_frames=args.maximum_drift_transition_frames,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0 if result["status"] == "PASS" else 2
+
+
+def _audit_insight_episode_poses(args: argparse.Namespace) -> int:
+    from .adapters.insight_pose_quality import audit_insight_episode_pose_quality
+
+    result = audit_insight_episode_pose_quality(
+        source=args.source.expanduser().resolve(),
+        review_manifest_path=args.review_manifest.expanduser().resolve(),
+        decisions_path=args.decisions.expanduser().resolve(),
+        task_path=args.task_spec.expanduser().resolve(),
+        output=args.output.expanduser().resolve(),
+        left_native_topic=args.left_native_topic,
+        right_native_topic=args.right_native_topic,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["status"] == "PASS" else 2
@@ -302,6 +339,14 @@ def build_parser() -> argparse.ArgumentParser:
     export_lerobot.add_argument("--annotation-manifest", type=Path, required=True)
     export_lerobot.add_argument("--decisions", type=Path, required=True)
     export_lerobot.add_argument("--task-spec", type=Path, required=True)
+    export_lerobot.add_argument(
+        "--episode-pose-audit",
+        type=Path,
+        help=(
+            "required by tasks with episode pose-quality rules; must PASS and "
+            "match the current manifest, decisions, and task spec"
+        ),
+    )
     export_lerobot.add_argument("--output", type=Path, required=True)
     export_lerobot.add_argument("--repo-id", required=True)
     export_lerobot.add_argument("--max-skew-ms", type=float)
@@ -391,6 +436,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate_lerobot.add_argument("--dataset", type=Path, required=True)
     validate_lerobot.set_defaults(handler=_validate_lerobot)
+
+    audit_insight_episode_poses = commands.add_parser(
+        "audit-insight-episode-poses",
+        help=(
+            "compare native VIO with Insight Global and rate each reviewed episode"
+        ),
+    )
+    audit_insight_episode_poses.add_argument("--source", type=Path, required=True)
+    audit_insight_episode_poses.add_argument(
+        "--review-manifest", type=Path, required=True
+    )
+    audit_insight_episode_poses.add_argument(
+        "--decisions", type=Path, required=True
+    )
+    audit_insight_episode_poses.add_argument(
+        "--task-spec", type=Path, required=True
+    )
+    audit_insight_episode_poses.add_argument("--output", type=Path, required=True)
+    audit_insight_episode_poses.add_argument("--left-native-topic")
+    audit_insight_episode_poses.add_argument("--right-native-topic")
+    audit_insight_episode_poses.set_defaults(handler=_audit_insight_episode_poses)
 
     correct_pose_drift = commands.add_parser(
         "correct-pose-drift",

@@ -2,6 +2,18 @@
   "task_id": "screw-nut-sorting",
   "description": "Use both grippers to sort one batch of mixed nuts and screws, placing nuts in the fixed left box and screws in the fixed right box.",
   "minimum_segment_frames": 10,
+  "episode_pose_quality": {
+    "plugin": "robot_dataset_annotator.tasks.screw_nut_sorting.pose_quality:audit_episode_pose_quality",
+    "native_translation_jump_m": 0.1,
+    "native_rotation_jump_deg": 20.0,
+    "global_translation_jump_m": 0.1,
+    "global_rotation_jump_deg": 20.0,
+    "alignment_translation_update_m": 0.05,
+    "alignment_rotation_update_deg": 10.0,
+    "maximum_pair_skew_ms": 5.0,
+    "minimum_valid_fraction": 0.99,
+    "maximum_invalid_run_frames": 2
+  },
   "hand_subtasks": {
     "left_hand": [
       {

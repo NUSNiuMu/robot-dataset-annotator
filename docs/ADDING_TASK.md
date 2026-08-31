@@ -21,6 +21,13 @@
 `episode_end_frame_exclusive` 和覆盖全部原子动作的 `atomic_boundaries`。这些结果仍只是审核
 提示，不能直接替代 decisions 中的视觉结论。
 
+任务需要对每个 episode 增加 pose 门时，可在 task spec 增加
+`episode_pose_quality: {"plugin": "module:function", ...thresholds}`。任务插件只处理已经
+同步到 review 帧的规范化 native/global 变换；ROS topic 发现、时间配对和重采样必须放在
+adapter。结果必须逐 episode、逐手报告修正状态和 `training_usable`，并明确后续 episode
+独立评估。缺失数据、延迟修正或无法解释的 Global 对齐跳变必须返回 `NEEDS_REVIEW`，不得把
+前一轮的坏状态传播到下一轮，也不得据自动结果删除源数据。
+
 自动门的优化指标至少同时报告候选精度和候选召回率。高精度低召回只适合加速人工确认，
 不能用于自动拒绝数据。
 
@@ -28,4 +35,5 @@
 重叠的单件抓放强行拆开。螺母放入固定左盒，螺丝放入固定右盒；最后一个物体释放后进入完成
 和撤离阶段。人工重新摆料属于 episode 间隔，人工干预、错放、盒外掉落或中央区域残留均不能
 作为 PASS episode。该任务没有自动插件，必须在所有视角中人工确认每轮边界，并分别记录
-左右夹爪结束分类、等待或撤离的子任务边界。
+左右夹爪结束分类、等待或撤离的子任务边界。导出前还必须运行任务配置的 native VIO 与
+Insight Global 逐 episode 审计；只有同帧修正或全程无漂移的 episode 可进入训练数据。

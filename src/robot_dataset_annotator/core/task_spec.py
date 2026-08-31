@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .io import read_json
 
@@ -33,6 +34,12 @@ class AtomicAction:
 
 
 @dataclass(frozen=True)
+class EpisodePoseQualitySpec:
+    plugin: str
+    config: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class TaskSpec:
     task_id: str
     description: str
@@ -42,6 +49,7 @@ class TaskSpec:
     context_action: AtomicAction | None = None
     left_hand_subtasks: tuple[SubtaskSemantic, ...] = ()
     right_hand_subtasks: tuple[SubtaskSemantic, ...] = ()
+    episode_pose_quality: EpisodePoseQualitySpec | None = None
 
     @staticmethod
     def _semantic(payload: dict[str, str]) -> SubtaskSemantic:
@@ -98,6 +106,24 @@ class TaskSpec:
             raise ValueError(
                 "task-level left_hand and right_hand subtasks must be defined together"
             )
+        pose_quality_payload = payload.get("episode_pose_quality")
+        if pose_quality_payload is not None and not isinstance(
+            pose_quality_payload, dict
+        ):
+            raise ValueError("episode_pose_quality must be an object")
+        pose_quality = None
+        if pose_quality_payload is not None:
+            pose_quality_plugin = str(pose_quality_payload.get("plugin", "")).strip()
+            if not pose_quality_plugin:
+                raise ValueError("episode_pose_quality requires a plugin")
+            pose_quality = EpisodePoseQualitySpec(
+                plugin=pose_quality_plugin,
+                config={
+                    str(key): value
+                    for key, value in pose_quality_payload.items()
+                    if key != "plugin"
+                },
+            )
         return cls(
             task_id=str(payload["task_id"]),
             description=str(payload["description"]),
@@ -109,6 +135,7 @@ class TaskSpec:
             ),
             left_hand_subtasks=left_hand_subtasks,
             right_hand_subtasks=right_hand_subtasks,
+            episode_pose_quality=pose_quality,
         )
 
     def subtasks_for_hand(self, hand: str) -> tuple[SubtaskSemantic, ...]:

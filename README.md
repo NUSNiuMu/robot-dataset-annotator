@@ -232,7 +232,27 @@ skills/          可随仓库复制或安装的标准 Codex Skill
 
 内置 `screw-nut-sorting` 以“一整批混合件分类完成”为 episode：固定左盒放螺母、固定右盒
 放螺丝，同一录制中的人工重新摆料只作为多 episode 之间的间隔。第一版不提供自动分段插件，
-必须人工确认每轮完整性、分类正确性以及左右夹爪各自的分类和撤离边界。
+必须人工确认每轮完整性、分类正确性以及左右夹爪各自的分类和撤离边界。该任务还要求在导出
+前逐 episode 对比双手 native VIO 与 Insight Global：native 跳变若被 Global 在同一帧抵消，
+该 episode 可标记 `PASS_AFTER_CORRECTION`；Global 同步跳变、延迟到后续帧才重新对齐、证据
+缺失或对齐本身不连续时，该 episode 保持 `NEEDS_REVIEW`。每轮独立判断，前一轮漂移不会自动
+判废后续轮次。
+
+```bash
+.venv/bin/rda audit-insight-episode-poses \
+  --source recording/ \
+  --review-manifest recording/review/manifest.json \
+  --decisions recording/review/decisions.json \
+  --task-spec .rda/screw-nut-sorting.json \
+  --output recording/review/episode_pose_quality_audit.json
+```
+
+审核 JSON 会分别列出可用和不可用 episode。若某轮不可用，应保留源 review 证据，由人工修正
+最终 decisions 后重新运行审计；不得直接删除源片段。`screw-nut-sorting` 导出时必须增加
+`--episode-pose-audit recording/review/episode_pose_quality_audit.json`，且该文件必须全部
+通过并与当前 manifest、decisions、task spec 哈希一致。桌面二维码的全局坐标变换、夹爪开合
+二维码及夹爪后方多面二维码的相机外参校准均属于独立证据，不能替代 VIO/Insight Global 的
+逐帧连续性判断。
 
 仓库自动化开发约束见 [AGENTS.md](AGENTS.md)；`CLAUDE.md` 与其同步并一同提交。代码行为、
 命令、schema 或 Skill 发生变化时，必须同步文档、运行测试、提交并推送当前分支。

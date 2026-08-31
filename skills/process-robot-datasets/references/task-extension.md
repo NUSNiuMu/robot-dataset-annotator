@@ -9,6 +9,12 @@ must be segmented by exhaustive manual review.
 Do not import ROS, a capture dashboard, or a training library from task code. Put raw-data parsing
 in `adapters/` and final dataset writing in a separate export adapter.
 
+When pose acceptance is task-specific, add an `episode_pose_quality` object containing a
+`module:function` plugin and thresholds to the task spec. The adapter must normalize and synchronize
+source-format poses before calling the plugin. Report each episode independently, require ambiguous
+or missing correction evidence to remain `NEEDS_REVIEW`, and gate export with an audit tied to the
+current input hashes. Never propagate one episode's tracking failure into a later episode.
+
 Build a labeled regression set containing normal successes, incomplete attempts, human
 intervention, sensor gaps, short actions, boundary ambiguity, and multiple complete attempts in one
 source segment. Measure candidate precision, candidate recall, boundary error, runtime, and scratch

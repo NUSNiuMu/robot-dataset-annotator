@@ -43,3 +43,10 @@ on the bottom and one on top, then confirm that all three cups return to one sta
 Use the first approach to the nested stack as the episode start, the renewed approach to the stable
 pyramid as the build/collapse boundary, and the completed gripper retreat as the exclusive end.
 Exclude camera handling and human setup or cleanup outside those bounds.
+
+For screw-and-nut sorting, compare each hand's native VIO with Insight Global inside every selected
+episode. Accept a native reset as corrected only when the Global stream cancels it at the same
+frame. A Global jump that follows the native reset, a missing correction, a synchronization gap, or
+a discontinuous alignment refresh requires review for that episode. Evaluate later episodes from
+their own boundaries; do not carry a failure or correction across the human-reset interval. Keep
+the source review evidence when excluding an unusable episode.
