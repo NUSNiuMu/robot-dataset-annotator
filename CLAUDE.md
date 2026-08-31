@@ -31,6 +31,8 @@ git log origin/main..HEAD --oneline
   原始值与审计证据的新 manifest，模糊的首次跳变必须返回 `NEEDS_REVIEW`。
 - `screw-nut-sorting` 必须逐 episode 对比双手 native VIO 与 Insight Global；只允许同帧全局
   抵消的漂移通过，延迟或缺失修正必须复核，且不得把前一 episode 的结论传播到后续 episode。
+- 修复 pose 的逐 episode 审计必须用保留的 raw 数组复现源 bag、用 corrected 数组判断漂移；
+  按 decisions 限定修复门禁时须绑定 decisions 哈希和精确选区，并保留选区外未解决事件。
 - 多录制 LeRobot 合并必须在同一官方 writer 中完成并全局重编号 episode；每帧保留来源录制
   索引和源帧，逐录制绑定 decisions、pose 审计、同步、外参和输入哈希，不得事后拼接目录。
 - 夹爪 marker 短缺失只可在同一 episode 内由前后可靠值插值最多 3 帧；不得跨 episode 或填充

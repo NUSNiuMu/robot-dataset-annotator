@@ -147,7 +147,8 @@ Before QR calibration or export, audit global pose continuity:
 
     rda correct-pose-drift --review-manifest <review-dir>/manifest.json \
       --output-manifest <review-dir>/manifest_pose_corrected.json \
-      --audit <review-dir>/pose_drift_audit.json
+      --audit <review-dir>/pose_drift_audit.json \
+      --decisions <review-dir>/decisions.json
 
 Use the corrected manifest only when the audit is `PASS`. The command may interpolate paired short
 spikes, stitch a high-confidence persistent coordinate jump and its later stable residual jumps,
@@ -156,6 +157,11 @@ or stitch a 2--4-step settling jump followed by stable tracking. A confirmed lar
 may also establish the instability chain for independent medium stable jumps earlier in that pose stream.
 Subsequent relative motion remains intact. It writes a new manifest with raw arrays and correction
 masks; ambiguous jumps remain unchanged and force `NEEDS_REVIEW`.
+When final decisions intentionally exclude a later ambiguous interval, pass `--decisions`. The PASS
+gate then applies only to the exact selected episode ranges while preserving full-stream status and
+all out-of-scope unresolved frames. The corrected manifest and audit must bind the decisions hash
+and selected ranges. Reproduce the source bag with the preserved raw pose arrays, then evaluate
+native-VIO correction against the corrected pose arrays during the per-episode audit.
 
 For batch trajectory inspection, generate a self-contained interactive 3D dashboard and machine-
 readable QC report from the reviewed recording root:

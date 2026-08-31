@@ -109,7 +109,8 @@ NPZ 输入包含 `state` 和 `state_valid`；Insight review parquet 可改用
 .venv/bin/rda correct-pose-drift \
   --review-manifest recording/review/manifest.json \
   --output-manifest recording/review/manifest_pose_corrected.json \
-  --audit recording/review/pose_drift_audit.json
+  --audit recording/review/pose_drift_audit.json \
+  --decisions recording/review/decisions.json
 ```
 
 高置信度短尖峰使用相邻有效 pose 插值；高置信度持续跳变及其后续稳定残余跳变从跳变帧起拼接回
@@ -122,6 +123,10 @@ pose 流中存在已确认的大幅坐标跳变，其前后独立出现的中等
 使用审核通过的修复 manifest。
 旋转阈值同时考虑 review 帧率可能高于 pose 发布频率；重复采样后集中到单个 review 帧的合理
 手部旋转不会被误判成坐标漂移。
+提供 `--decisions` 时，PASS 门禁只覆盖最终选择的 episode；选区外仍会完整记录未解决跳变，
+但不会误伤更早的合格 episode。修复 manifest 和审计同时绑定 decisions 哈希与精确帧区间。
+后续逐 episode 审计先用保存的 raw pose 复现 rosbag 时间轴，再用 corrected pose 判断 Global
+是否在同帧抵消 native VIO 跳变，避免把修复数据误判为无法复现源 bag。
 
 ## 3D 轨迹质检
 

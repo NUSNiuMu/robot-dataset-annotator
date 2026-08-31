@@ -430,11 +430,38 @@ def correct_review_manifest_pose_drift(
     audit_path: Path,
     maximum_spike_frames: int = 3,
     maximum_drift_transition_frames: int = 45,
+    decisions_path: Path | None = None,
 ) -> dict[str, Any]:
     for output in (output_manifest_path, audit_path):
         if output.exists():
             raise FileExistsError(f"refusing to overwrite pose drift output: {output}")
     manifest = read_json(review_manifest_path)
+    frame_count = int(manifest["frame_count"])
+    selected_ranges: list[list[int]] | None = None
+    decisions_sha256: str | None = None
+    if decisions_path is not None:
+        decisions = read_json(decisions_path)
+        selected_ranges = []
+        previous_end = -1
+        for review in decisions.get("reviews", []):
+            if str(review.get("visual_status", "")).upper() != "PASS":
+                continue
+            rows = review.get("episodes")
+            if not isinstance(rows, list):
+                rows = [review]
+            for episode in rows:
+                start = int(episode["episode_start_frame"])
+                end = int(episode["episode_end_frame_exclusive"])
+                if start < previous_end or end <= start or end > frame_count:
+                    raise ValueError(
+                        "selected pose-correction ranges must be ordered, "
+                        "non-overlapping, and inside the review manifest"
+                    )
+                selected_ranges.append([start, end])
+                previous_end = end
+        if not selected_ranges:
+            raise ValueError("pose correction decisions contain no PASS episodes")
+        decisions_sha256 = _sha256(decisions_path)
     corrected_manifest = dict(manifest)
     corrected_poses: list[dict[str, Any]] = []
     stream_audits: list[dict[str, Any]] = []
@@ -455,8 +482,24 @@ def correct_review_manifest_pose_drift(
         corrected_row["pose_correction_mask"] = mask.tolist()
         corrected_poses.append(corrected_row)
         stream_audit = {"role": str(row.get("role", "")), **audit}
+        if selected_ranges is not None:
+            unresolved = [int(frame) for frame in audit["unresolved_jump_frames"]]
+            selected_unresolved = [
+                frame
+                for frame in unresolved
+                if any(start <= frame < end for start, end in selected_ranges)
+            ]
+            stream_audit["full_stream_status"] = audit["status"]
+            stream_audit["selected_ranges"] = selected_ranges
+            stream_audit["selected_unresolved_jump_frames"] = selected_unresolved
+            stream_audit["out_of_scope_unresolved_jump_frames"] = [
+                frame for frame in unresolved if frame not in selected_unresolved
+            ]
+            stream_audit["status"] = (
+                "PASS" if not selected_unresolved else "NEEDS_REVIEW"
+            )
         stream_audits.append(stream_audit)
-        if audit["status"] != "PASS":
+        if stream_audit["status"] != "PASS":
             overall_status = "NEEDS_REVIEW"
     source_hash = _sha256(review_manifest_path)
     corrected_manifest["poses"] = corrected_poses
@@ -465,6 +508,11 @@ def correct_review_manifest_pose_drift(
         "status": overall_status,
         "source_manifest_sha256": source_hash,
         "audit_file": audit_path.name,
+        "audit_scope": (
+            "selected_episodes" if selected_ranges is not None else "full_manifest"
+        ),
+        "selected_ranges": selected_ranges,
+        "decisions_sha256": decisions_sha256,
     }
     payload = {
         "schema_version": 1,
@@ -472,6 +520,12 @@ def correct_review_manifest_pose_drift(
         "source_manifest": str(review_manifest_path),
         "source_manifest_sha256": source_hash,
         "corrected_manifest": str(output_manifest_path),
+        "audit_scope": (
+            "selected_episodes" if selected_ranges is not None else "full_manifest"
+        ),
+        "selected_ranges": selected_ranges,
+        "decisions": str(decisions_path) if decisions_path is not None else None,
+        "decisions_sha256": decisions_sha256,
         "streams": stream_audits,
     }
     write_json_atomic(output_manifest_path, corrected_manifest)

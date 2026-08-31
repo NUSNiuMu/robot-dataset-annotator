@@ -181,11 +181,81 @@ def _manifest_sampling(
     return sampling, candidates[sampling], maximum_difference
 
 
+def _validated_pose_drift_evidence(
+    manifest: dict[str, Any],
+    review_manifest_path: Path,
+    decisions_path: Path,
+    episodes: list[dict[str, int]],
+) -> dict[str, Any] | None:
+    correction = manifest.get("pose_drift_correction")
+    if correction is None:
+        return None
+    if not isinstance(correction, dict) or correction.get("schema_version") != 1:
+        raise ValueError("unsupported pose-drift correction metadata")
+    if correction.get("status") != "PASS":
+        raise ValueError("corrected review manifest lacks a PASS pose-drift audit")
+    audit_file = correction.get("audit_file")
+    if not isinstance(audit_file, str) or not audit_file.strip():
+        raise ValueError("corrected review manifest lacks its pose-drift audit file")
+    audit_path = Path(audit_file).expanduser()
+    if not audit_path.is_absolute():
+        audit_path = review_manifest_path.resolve().parent / audit_path
+    audit_path = audit_path.resolve()
+    if not audit_path.is_file():
+        raise FileNotFoundError(f"pose-drift audit does not exist: {audit_path}")
+    audit = read_json(audit_path)
+    if audit.get("schema_version") != 1 or audit.get("status") != "PASS":
+        raise ValueError("corrected review manifest pose-drift audit is not PASS")
+    if audit.get("source_manifest_sha256") != correction.get(
+        "source_manifest_sha256"
+    ):
+        raise ValueError("pose-drift audit source hash does not match the manifest")
+    corrected_manifest = Path(str(audit.get("corrected_manifest", ""))).expanduser()
+    if not corrected_manifest.is_absolute():
+        corrected_manifest = audit_path.parent / corrected_manifest
+    if corrected_manifest.resolve() != review_manifest_path.resolve():
+        raise ValueError("pose-drift audit does not identify the current manifest")
+    streams = audit.get("streams")
+    if not isinstance(streams, list) or not streams or any(
+        not isinstance(row, dict) or row.get("status") != "PASS" for row in streams
+    ):
+        raise ValueError("pose-drift audit contains a non-PASS pose stream")
+    scope = str(correction.get("audit_scope", "full_manifest"))
+    selected_ranges = [
+        [row["episode_start_frame"], row["episode_end_frame_exclusive"]]
+        for row in episodes
+    ]
+    if scope == "selected_episodes":
+        if correction.get("selected_ranges") != selected_ranges or audit.get(
+            "selected_ranges"
+        ) != selected_ranges:
+            raise ValueError("pose-drift audit scope does not match reviewed episodes")
+        decisions_hash = _sha256(decisions_path)
+        if correction.get("decisions_sha256") != decisions_hash or audit.get(
+            "decisions_sha256"
+        ) != decisions_hash:
+            raise ValueError("pose-drift audit does not match current decisions")
+    elif scope != "full_manifest":
+        raise ValueError(f"unsupported pose-drift audit scope: {scope}")
+    return {
+        "schema_version": 1,
+        "status": "PASS",
+        "audit": str(audit_path),
+        "audit_sha256": _sha256(audit_path),
+        "source_manifest_sha256": correction["source_manifest_sha256"],
+        "audit_scope": scope,
+        "selected_ranges": correction.get("selected_ranges"),
+        "decisions_sha256": correction.get("decisions_sha256"),
+    }
+
+
 def _role_comparison(
     manifest: dict[str, Any],
     manifest_pose: dict[str, Any],
     native_rows: list[tuple[int, int, np.ndarray]],
     global_rows: list[tuple[int, int, np.ndarray]],
+    *,
+    corrected_manifest: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     frame_count = int(manifest["frame_count"])
     fps = float(manifest["fps"])
@@ -204,6 +274,39 @@ def _role_comparison(
     manifest_positions = np.asarray(manifest_pose["positions"], dtype=np.float64)
     if manifest_positions.shape != (frame_count, 3):
         raise ValueError("review manifest pose positions do not match frame_count")
+    has_raw_positions = "raw_positions" in manifest_pose
+    has_raw_quaternions = "raw_quaternions_xyzw" in manifest_pose
+    if has_raw_positions != has_raw_quaternions:
+        raise ValueError("corrected pose stream has incomplete raw pose evidence")
+    if has_raw_positions != corrected_manifest:
+        raise ValueError(
+            "raw pose evidence and pose-drift correction metadata disagree"
+        )
+    source_reference_positions = (
+        np.asarray(manifest_pose["raw_positions"], dtype=np.float64)
+        if corrected_manifest
+        else manifest_positions
+    )
+    if source_reference_positions.shape != (frame_count, 3):
+        raise ValueError("raw pose positions do not match frame_count")
+    if corrected_manifest:
+        raw_quaternions = np.asarray(
+            manifest_pose["raw_quaternions_xyzw"], dtype=np.float64
+        )
+        _, raw_rotation_valid = pose_matrices(
+            source_reference_positions, raw_quaternions
+        )
+        if raw_quaternions.shape != (frame_count, 4) or not np.all(
+            raw_rotation_valid
+        ):
+            raise ValueError("raw pose rotations are invalid")
+        correction_mask = np.asarray(
+            manifest_pose.get("pose_correction_mask"), dtype=bool
+        )
+        if correction_mask.shape != (frame_count,):
+            raise ValueError("pose correction mask does not match frame_count")
+    else:
+        correction_mask = np.zeros(frame_count, dtype=bool)
     paired_native: list[np.ndarray] = []
     raw_pair_skew_ms: list[float] = []
     for global_index, global_header_stamp_value in enumerate(global_header_stamps):
@@ -234,7 +337,7 @@ def _role_comparison(
             global_bag_stamps,
             global_matrices,
             targets,
-            manifest_positions,
+            source_reference_positions,
         )
     )
     if sampling == "nearest":
@@ -263,6 +366,8 @@ def _role_comparison(
         ),
         "maximum_manifest_global_position_difference_m": maximum_manifest_difference,
         "review_manifest_pose_sampling": sampling,
+        "review_manifest_pose_corrected": corrected_manifest,
+        "corrected_frame_count": int(np.count_nonzero(correction_mask)),
     }
     return comparison, synchronization
 
@@ -318,6 +423,9 @@ def audit_insight_episode_pose_quality(
     if task.episode_pose_quality is None:
         raise ValueError(f"task {task.task_id} has no episode pose-quality audit")
     episodes = _pass_episodes(decisions, int(manifest["frame_count"]))
+    pose_drift_evidence = _validated_pose_drift_evidence(
+        manifest, review_manifest_path, decisions_path, episodes
+    )
     poses_by_role = {
         str(row.get("role", "")): row for row in manifest.get("poses", [])
     }
@@ -346,6 +454,7 @@ def audit_insight_episode_pose_quality(
             poses_by_role[role],
             rows_by_topic[native_topic],
             rows_by_topic[global_topic],
+            corrected_manifest=pose_drift_evidence is not None,
         )
         comparisons[role] = comparison
         synchronization[role] = sync
@@ -370,6 +479,7 @@ def audit_insight_episode_pose_quality(
             for role, pair in topic_pairs.items()
         },
         "synchronization": synchronization,
+        "pose_drift_correction": pose_drift_evidence,
     }
     write_json_atomic(output, payload)
     return payload

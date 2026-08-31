@@ -245,6 +245,9 @@ def _correct_pose_drift(args: argparse.Namespace) -> int:
         audit_path=args.audit.expanduser().resolve(),
         maximum_spike_frames=args.maximum_spike_frames,
         maximum_drift_transition_frames=args.maximum_drift_transition_frames,
+        decisions_path=(
+            args.decisions.expanduser().resolve() if args.decisions else None
+        ),
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["status"] == "PASS" else 2
@@ -531,6 +534,14 @@ def build_parser() -> argparse.ArgumentParser:
     correct_pose_drift.add_argument("--review-manifest", type=Path, required=True)
     correct_pose_drift.add_argument("--output-manifest", type=Path, required=True)
     correct_pose_drift.add_argument("--audit", type=Path, required=True)
+    correct_pose_drift.add_argument(
+        "--decisions",
+        type=Path,
+        help=(
+            "limit PASS/NEEDS_REVIEW gating to selected PASS episode ranges; "
+            "out-of-scope unresolved jumps remain recorded"
+        ),
+    )
     correct_pose_drift.add_argument("--maximum-spike-frames", type=int, default=3)
     correct_pose_drift.add_argument(
         "--maximum-drift-transition-frames", type=int, default=45

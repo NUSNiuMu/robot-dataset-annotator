@@ -39,6 +39,9 @@ paired native VIO 使用同一采样方式；
 `NEEDS_REVIEW`。episode 边界外的事件不会进入当前轮次，因此重置间隔或前一轮漂移不会污染
 后续 episode。导出门校验审计与 manifest、decisions、task spec 的哈希，且只接受所有待导出
 episode 均为 `training_usable=true` 的 `PASS` 审计；它不修改 pose，也不自动删除源数据。
+修复 manifest 的源复现使用其独立保存的 raw pose，实际质量判断使用 corrected pose。若漂移
+审计由 decisions 限定选区，则修复 manifest、漂移审计和逐 episode 审计必须同时绑定相同的
+decisions 哈希与有序帧区间；选区外的未解决事件继续保留，但不传播到更早 episode。
 
 `adapters/lerobot_export.py` 是可选依赖边界：它延迟导入 ROS、OpenCV 和 LeRobot，按审核
 时间轴对 ROS 2 bag（MCAP 或 SQLite3）三路相机做最近邻同步，并只导出 decisions 接受的帧。
@@ -78,6 +81,8 @@ SE(3) 上插值；短时、同方向且累计位移明显不可能的渐进漂�
 结束后的相对运动；单次极大跳变且后续局部运动稳定时，会从跳变点起拼接坐标段。
 不满足高置信度条件的跳变只写 `NEEDS_REVIEW`。修复结果写到新 manifest，保留原始数组、
 逐帧 correction mask、阈值和事件审计，不覆盖源 review manifest。
+可选的 decisions 范围门禁只对最终 PASS episode 计算修复状态，同时在每路审计中保留完整流
+状态、选区内未解决帧和选区外未解决帧；任何 decisions 或帧区间变化都会使后续证据失效。
 
 `adapters/trajectory_qc.py` 消费 decisions、最终 PASS 漂移审计、修复 manifest 和可选二维码
 标定，生成 raw/corrected 三路轨迹的自包含交互式 HTML、JSON/CSV 指标和可选 PNG。交互轨迹
