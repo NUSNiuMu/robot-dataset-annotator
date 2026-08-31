@@ -21,6 +21,8 @@ git log origin/main..HEAD --oneline
 - `tasks/` 只包含任务语义和候选边界算法。无法可靠判断时返回 `unresolved`，不能伪造
   边界或自动丢弃源数据。
 - `adapters/` 隔离 rosbag、Insight、LeRobot 等外部格式与可选依赖。
+- Insight 源读取必须让 rosbag2 根据 bag metadata 自动选择 MCAP 或 SQLite3 存储插件，不得
+  硬编码单一存储格式。
 - `task_specs/` 定义稳定 task ID、原子动作、最短帧数和可选插件入口。
 - 自动结果只是人工审核提示；除非另有批准，所有源片段和必需视角都要穷尽审核。
 - 二维码标定上下文必须在源 review 中独立保留；全局变换写入 JSON，不得静默改写源 pose。
@@ -29,6 +31,10 @@ git log origin/main..HEAD --oneline
   原始值与审计证据的新 manifest，模糊的首次跳变必须返回 `NEEDS_REVIEW`。
 - `screw-nut-sorting` 必须逐 episode 对比双手 native VIO 与 Insight Global；只允许同帧全局
   抵消的漂移通过，延迟或缺失修正必须复核，且不得把前一 episode 的结论传播到后续 episode。
+- 多录制 LeRobot 合并必须在同一官方 writer 中完成并全局重编号 episode；每帧保留来源录制
+  索引和源帧，逐录制绑定 decisions、pose 审计、同步、外参和输入哈希，不得事后拼接目录。
+- 夹爪 marker 短缺失只可在同一 episode 内由前后可靠值插值最多 3 帧；不得跨 episode 或填充
+  无边界/长缺失，且 state/action 必须保留 direct、单 marker 推算、插值或 invalid 来源代码。
 - LeRobot 工作数据集保留 `rda/` 验证证据；严格交付副本只复制 schema 实际引用的官方
   数据目录，以及任务明确要求的不可变标定 sidecar（例如 `qr_transform.json`）。仅在确认根目录
   `images/` 不含文件时，才可省略官方写入器遗留的空目录骨架。

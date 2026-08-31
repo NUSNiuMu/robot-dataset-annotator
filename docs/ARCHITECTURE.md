@@ -32,6 +32,8 @@ episode 可选的 `context_start_frame` 允许保留正式任务开始前的连�
 
 任务可通过 `episode_pose_quality` 声明逐 episode 的 pose 质量插件。Insight 适配器负责从
 ROS 2 bag 读取 native VIO 与 Insight Global、按 header 时间配对并重采样到 review 时间轴；
+适配器会在 1 mm 复现门内自动选择 manifest 实际使用的线性插值或旧版最近邻采样，并让
+paired native VIO 使用同一采样方式；
 `tasks/screw_nut_sorting/pose_quality.py` 只接收规范化矩阵，判断 native 跳变是否被 Global
 同帧抵消。Global 也跳变且未修正、延迟修正、数据缺口或对齐变换不连续均返回
 `NEEDS_REVIEW`。episode 边界外的事件不会进入当前轮次，因此重置间隔或前一轮漂移不会污染
@@ -39,11 +41,15 @@ ROS 2 bag 读取 native VIO 与 Insight Global、按 header 时间配对并重�
 episode 均为 `training_usable=true` 的 `PASS` 审计；它不修改 pose，也不自动删除源数据。
 
 `adapters/lerobot_export.py` 是可选依赖边界：它延迟导入 ROS、OpenCV 和 LeRobot，按审核
-时间轴对 MCAP 三路相机做最近邻同步，并只导出 decisions 接受的帧。低维观测来自已同步的
+时间轴对 ROS 2 bag（MCAP 或 SQLite3）三路相机做最近邻同步，并只导出 decisions 接受的帧。
+rosbag2 根据 `metadata.yaml` 自动选择存储插件。低维观测来自已同步的
 review manifest，视频来自原始相机消息；动作语义、同步误差、输入哈希和 LeRobot 版本写入
 数据集内的 `rda/export_manifest.json`。视频默认在源消息解码时直接流式送入三路编码器，
-省去逐帧 PNG 暂存；兼容模式仍可使用 PNG 分阶段编码。导出器当前只接受单 source segment，
-避免把多个独立时间轴静默拼接。
+省去逐帧 PNG 暂存；兼容模式仍可使用 PNG 分阶段编码。每条录制仍只接受单 source segment，
+避免在录制内部静默混合时间轴。`adapters/lerobot_batch_export.py` 在同一个官方 writer 中依次
+写入多条已审核录制，全局重编号 episode，并要求 FPS 和三路视频几何一致。每帧保存
+`source_recording_index` 与源帧索引，导出清单把录制索引绑定到 bag 名称、episode 范围、输入
+哈希、pose 审计、同步和头部外参；因此合并不是对 Parquet 或视频目录的事后拼接。
 
 可选的 `--gripper-calibration` 在适配器边界内从左右腕 RGB 帧检测 ArUco 0/1 marker。
 像素中心距离按相机名选择标定，再映射到统一的物理夹爪宽度；左右各 9D pose 后插入宽度形成
@@ -51,11 +57,13 @@ review manifest，视频来自原始相机消息；动作语义、同步误差�
 标定为固定腕相机提供参考图像尺寸和两 jaw marker 的对称中点；仅一个 marker 唯一可见时，
 适配器可用该 marker 到中点距离的两倍恢复总距离。该模式必须显式配置，且输入纵横比必须与
 标定匹配。双 marker 可见时仍优先直接测量；重复、全缺失或几何不匹配时保持零并标记
-invalid。检测覆盖率、direct/inferred 来源、成对中点误差、裁剪和原始距离统计写入
-provenance。导出器始终写 `meta/manifest.json` 与 `meta/modality.json`，记录维度、物理语义
-和字段分组。
+invalid。批量流式导出允许同一 episode 内、前后均有可靠测量的最多 3 帧缺失做线性插值；
+不得跨 episode，也不得填充无右边界或更长的缺失。state/action 分别携带 invalid、direct、
+symmetric inference、temporal interpolation 来源代码。检测覆盖率、direct/inferred 来源、
+插值区间、成对中点误差、裁剪和原始距离统计写入 provenance。导出器始终写
+`meta/manifest.json` 与 `meta/modality.json`，记录维度、物理语义和字段分组。
 
-头部 review pose 是 tracking frame 的全局 pose。导出器读取 MCAP 的 `tf_static` 和彩色相机
+头部 review pose 是 tracking frame 的全局 pose。导出器读取 ROS 2 bag 的 `tf_static` 和彩色相机
 `CameraInfo`，沿静态坐标树计算 tracking frame 到 RGB 相机的外参，额外输出
 `observation.head_camera_pose_global` 及其有效性掩码。原有 `observation.head_pose` 保留，
 避免静默改变旧字段语义。
@@ -80,7 +88,8 @@ SE(3) 上插值；短时、同方向且累计位移明显不可能的渐进漂�
 包含实际修正时才可能标记 `PASS_AFTER_CORRECTION`。
 
 `adapters/lerobot_validation.py` 先直接检查 Parquet 的 row、episode、timestamp、source
-frame、18D/20D 状态、物理夹爪非负性、有效性和 next-frame action 不变量，并核对
+recording/source frame、18D/20D 状态、物理夹爪非负性、测量来源、有效性和 next-frame action
+不变量，并核对
 `meta/manifest.json` 与 `meta/modality.json`，再完整解码每一个视频文件。随后用
 官方 `LeRobotDataset` 做代表性索引并通过 PyTorch DataLoader 读取一个 batch；两个阶段分别
 写独立 PASS 证据，官方检查失败时不会伪造完成状态。

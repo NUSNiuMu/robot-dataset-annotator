@@ -44,6 +44,36 @@ def _validate_low_dimensional_data(
     head_valid = _column(table, "observation.head_pose_valid", np.uint8)
     action = _column(table, "action", np.float32)
     action_valid = _column(table, "action_is_valid", np.uint8)
+    source_recordings = (export or {}).get("source_recordings", [])
+    has_source_recording_index = (
+        "annotation.source_recording_index" in table.column_names
+    )
+    if source_recordings and not has_source_recording_index:
+        raise ValueError("multi-recording dataset lacks source recording indices")
+    source_recording_indices = (
+        _column(table, "annotation.source_recording_index", np.int64).reshape(-1)
+        if has_source_recording_index
+        else None
+    )
+    gripper_source_columns = {
+        "annotation.gripper_width_source",
+        "annotation.action_gripper_width_source",
+    }
+    present_gripper_source_columns = gripper_source_columns.intersection(
+        table.column_names
+    )
+    if present_gripper_source_columns and (
+        present_gripper_source_columns != gripper_source_columns
+    ):
+        raise ValueError("dataset contains an incomplete gripper source schema")
+    state_gripper_sources = action_gripper_sources = None
+    if present_gripper_source_columns:
+        state_gripper_sources = _column(
+            table, "annotation.gripper_width_source", np.int64
+        )
+        action_gripper_sources = _column(
+            table, "annotation.action_gripper_width_source", np.int64
+        )
     has_subtasks = "annotation.left_hand_subtask_index" in table.column_names
     subtask_columns = {
         "annotation.left_hand_subtask_index",
@@ -131,6 +161,32 @@ def _validate_low_dimensional_data(
             widths = values[:, [9, 19]]
             if np.any(widths < 0.0):
                 raise ValueError(f"{label} contains negative gripper widths")
+        source_codes = (export or {}).get("gripper_width_source_codes")
+        if source_codes is not None and state_gripper_sources is None:
+            raise ValueError("gripper export lacks per-frame measurement sources")
+        if state_gripper_sources is not None:
+            if state_gripper_sources.shape != (row_count, 2) or (
+                action_gripper_sources.shape != (row_count, 2)
+            ):
+                raise ValueError("gripper measurement sources must have shape Nx2")
+            allowed_source_codes = set(int(value) for value in source_codes.values())
+            if not set(np.unique(state_gripper_sources)).issubset(
+                allowed_source_codes
+            ) or not set(np.unique(action_gripper_sources)).issubset(
+                allowed_source_codes
+            ):
+                raise ValueError("dataset contains an unknown gripper source code")
+            invalid_code = int(source_codes["invalid"])
+            if not np.array_equal(
+                state_gripper_sources != invalid_code,
+                state_valid[:, [9, 19]].astype(bool),
+            ):
+                raise ValueError("state gripper sources disagree with validity")
+            if not np.array_equal(
+                action_gripper_sources != invalid_code,
+                action_valid[:, [9, 19]].astype(bool),
+            ):
+                raise ValueError("action gripper sources disagree with validity")
 
     if sum(int(row["length"]) for row in episodes) != row_count:
         raise ValueError("episode lengths do not sum to the dataset row count")
@@ -177,6 +233,27 @@ def _validate_low_dimensional_data(
             raise ValueError(
                 f"episode {expected_episode} source frames are not contiguous"
             )
+        if source_recording_indices is not None:
+            actual_recording_indices = np.unique(
+                source_recording_indices[selection]
+            )
+            if len(actual_recording_indices) != 1:
+                raise ValueError(
+                    f"episode {expected_episode} crosses source recordings"
+                )
+            if source_recordings:
+                matched = [
+                    row
+                    for row in source_recordings
+                    if int(row["global_episode_start"]) <= expected_episode
+                    < int(row["global_episode_end_exclusive"])
+                ]
+                if len(matched) != 1 or int(
+                    matched[0]["source_recording_index"]
+                ) != int(actual_recording_indices[0]):
+                    raise ValueError(
+                        f"episode {expected_episode} source recording mapping is invalid"
+                    )
         episode_actions = atomic_actions[selection]
         allowed_actions = np.concatenate((np.asarray([-1]), expected_actions))
         if not np.isin(episode_actions, allowed_actions).all():
@@ -301,6 +378,17 @@ def _validate_low_dimensional_data(
             raise ValueError(
                 f"episode {expected_episode} final action validity is invalid"
             )
+        if state_gripper_sources is not None:
+            episode_state_sources = state_gripper_sources[selection]
+            episode_action_sources = action_gripper_sources[selection]
+            if not np.array_equal(
+                episode_action_sources[:-1], episode_state_sources[1:]
+            ) or not np.array_equal(
+                episode_action_sources[-1], episode_state_sources[-1]
+            ):
+                raise ValueError(
+                    f"episode {expected_episode} gripper action sources are invalid"
+                )
 
     if len(set(action_to_task.values())) != len(action_to_task):
         raise ValueError("atomic actions do not map to distinct tasks")
@@ -323,6 +411,10 @@ def _validate_low_dimensional_data(
     if has_subtasks:
         result["subtask_semantics"] = "PASS"
         result["task_and_subtask_progress"] = "PASS"
+    if source_recording_indices is not None:
+        result["source_recording_traceability"] = "PASS"
+    if state_gripper_sources is not None:
+        result["gripper_measurement_sources"] = "PASS"
     return result
 
 
@@ -340,6 +432,11 @@ def _validate_delivery_metadata(
         raise ValueError("delivery manifest frame count is incorrect")
     if int(manifest.get("episode_count", -1)) != int(export["episodes"]):
         raise ValueError("delivery manifest episode count is incorrect")
+    source_recordings = export.get("source_recordings", [])
+    if source_recordings and int(manifest.get("source_recordings", -1)) != len(
+        source_recordings
+    ):
+        raise ValueError("delivery manifest source recording count is incorrect")
     for key in ("observation.state", "action"):
         if list(info["features"][key]["shape"]) != [state_dimension]:
             raise ValueError(f"LeRobot info has an incorrect {key} shape")

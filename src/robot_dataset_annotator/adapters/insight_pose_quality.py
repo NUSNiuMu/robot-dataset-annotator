@@ -141,6 +141,46 @@ def _interpolate_matrices(
     return result
 
 
+def _nearest_matrices(
+    stamps: np.ndarray, matrices: np.ndarray, targets: np.ndarray
+) -> np.ndarray:
+    """Sample poses exactly as the review-manifest synchronizer does."""
+    return np.asarray(
+        [matrices[_nearest_index(stamps, int(target))] for target in targets]
+    )
+
+
+def _manifest_sampling(
+    stamps: np.ndarray,
+    matrices: np.ndarray,
+    targets: np.ndarray,
+    manifest_positions: np.ndarray,
+) -> tuple[str, np.ndarray, float]:
+    """Reproduce both supported review-manifest pose synchronizers."""
+    candidates = {
+        "interpolated": _interpolate_matrices(stamps, matrices, targets),
+        "nearest": _nearest_matrices(stamps, matrices, targets),
+    }
+    differences = {
+        name: float(
+            np.max(np.linalg.norm(rows[:, :3, 3] - manifest_positions, axis=1))
+        )
+        for name, rows in candidates.items()
+    }
+    sampling = min(differences, key=differences.get)
+    maximum_difference = differences[sampling]
+    if maximum_difference > 0.001:
+        detail = ", ".join(
+            f"{name}={difference:.6f} m"
+            for name, difference in sorted(differences.items())
+        )
+        raise ValueError(
+            "source Insight Global poses do not reproduce the review manifest: "
+            f"{detail}"
+        )
+    return sampling, candidates[sampling], maximum_difference
+
+
 def _role_comparison(
     manifest: dict[str, Any],
     manifest_pose: dict[str, Any],
@@ -181,12 +221,6 @@ def _role_comparison(
         ],
         dtype=np.int64,
     )
-    selected_native_array = _interpolate_matrices(
-        global_bag_stamps, np.asarray(paired_native), targets
-    )
-    source_global_array = _interpolate_matrices(
-        global_bag_stamps, global_matrices, targets
-    )
     manifest_quaternions = np.asarray(
         manifest_pose["quaternions_xyzw"], dtype=np.float64
     )
@@ -195,14 +229,21 @@ def _role_comparison(
     )
     if not np.all(manifest_rotation_valid):
         raise ValueError("review manifest contains invalid pose rotations")
-    manifest_difference = np.linalg.norm(
-        source_global_array[:, :3, 3] - manifest_positions, axis=1
+    sampling, source_global_array, maximum_manifest_difference = (
+        _manifest_sampling(
+            global_bag_stamps,
+            global_matrices,
+            targets,
+            manifest_positions,
+        )
     )
-    maximum_manifest_difference = float(np.max(manifest_difference))
-    if maximum_manifest_difference > 0.001:
-        raise ValueError(
-            "source Insight Global poses do not reproduce the review manifest: "
-            f"maximum position difference is {maximum_manifest_difference:.6f} m"
+    if sampling == "nearest":
+        selected_native_array = _nearest_matrices(
+            global_bag_stamps, np.asarray(paired_native), targets
+        )
+    else:
+        selected_native_array = _interpolate_matrices(
+            global_bag_stamps, np.asarray(paired_native), targets
         )
     comparison = {
         "review_frames": np.arange(frame_count, dtype=np.int64),
@@ -221,6 +262,7 @@ def _role_comparison(
             np.max(np.diff(global_bag_stamps)) / 1_000_000
         ),
         "maximum_manifest_global_position_difference_m": maximum_manifest_difference,
+        "review_manifest_pose_sampling": sampling,
     }
     return comparison, synchronization
 

@@ -51,6 +51,123 @@ class GripperMeasurement:
     distance_px: float | None
     marker_counts: dict[int, int]
     clipped: str | None = None
+    source: str = "direct"
+
+
+GRIPPER_WIDTH_SOURCE_CODES = {
+    "invalid": 0,
+    "direct": 1,
+    "symmetric_inference": 2,
+    "temporal_interpolation": 3,
+}
+
+
+class StreamingGripperInterpolator:
+    """Resolve short marker dropouts without crossing episode boundaries."""
+
+    def __init__(self, maximum_gap_frames: int = 3):
+        if maximum_gap_frames < 0:
+            raise ValueError("maximum gripper interpolation gap must be non-negative")
+        self.maximum_gap_frames = maximum_gap_frames
+        self._raw: list[GripperMeasurement] = []
+        self._episode_indices: list[int] = []
+        self._resolved: list[GripperMeasurement] = []
+        self._interpolated_runs = 0
+        self._interpolated_frames = 0
+
+    def push(self, measurement: GripperMeasurement, episode_index: int) -> None:
+        if self._episode_indices and episode_index < self._episode_indices[-1]:
+            raise ValueError("gripper episode indices must be monotonic")
+        self._raw.append(measurement)
+        self._episode_indices.append(int(episode_index))
+        self._drain(final=False)
+
+    def finish(self) -> None:
+        self._drain(final=True)
+        if len(self._resolved) != len(self._raw):
+            raise ValueError("gripper interpolation did not resolve every frame")
+
+    def get(self, index: int) -> GripperMeasurement | None:
+        return self._resolved[index] if index < len(self._resolved) else None
+
+    def _append_interpolated_run(self, start: int, end: int) -> None:
+        left = self._resolved[start - 1]
+        right = self._raw[end]
+        denominator = end - start + 1
+        for index in range(start, end):
+            fraction = (index - start + 1) / denominator
+            width = left.width_m + fraction * (right.width_m - left.width_m)
+            self._resolved.append(
+                GripperMeasurement(
+                    width_m=float(width),
+                    valid=True,
+                    distance_px=None,
+                    marker_counts=dict(self._raw[index].marker_counts),
+                    source="temporal_interpolation",
+                )
+            )
+        self._interpolated_runs += 1
+        self._interpolated_frames += end - start
+
+    def _drain(self, *, final: bool) -> None:
+        while len(self._resolved) < len(self._raw):
+            start = len(self._resolved)
+            measurement = self._raw[start]
+            if measurement.valid:
+                self._resolved.append(measurement)
+                continue
+
+            episode_index = self._episode_indices[start]
+            end = start
+            while (
+                end < len(self._raw)
+                and self._episode_indices[end] == episode_index
+                and not self._raw[end].valid
+            ):
+                end += 1
+            bounded_on_right = (
+                end < len(self._raw)
+                and self._episode_indices[end] == episode_index
+                and self._raw[end].valid
+            )
+            bounded_on_left = (
+                start > 0
+                and self._episode_indices[start - 1] == episode_index
+                and self._resolved[start - 1].valid
+            )
+            gap = end - start
+            if bounded_on_left and bounded_on_right and gap <= self.maximum_gap_frames:
+                self._append_interpolated_run(start, end)
+                continue
+
+            crossed_episode = (
+                end < len(self._raw)
+                and self._episode_indices[end] != episode_index
+            )
+            known_unusable = (
+                bounded_on_right
+                or crossed_episode
+                or gap > self.maximum_gap_frames
+                or final
+            )
+            if not known_unusable:
+                break
+            self._resolved.extend(self._raw[start:end])
+
+    def audit(self) -> dict[str, int | float]:
+        valid_frames = sum(row.valid for row in self._resolved)
+        invalid_frames = len(self._resolved) - valid_frames
+        return {
+            "maximum_gap_frames": self.maximum_gap_frames,
+            "interpolated_runs": self._interpolated_runs,
+            "interpolated_frames": self._interpolated_frames,
+            "resolved_frames": len(self._resolved),
+            "resolved_valid_frames": valid_frames,
+            "resolved_invalid_frames": invalid_frames,
+            "resolved_valid_fraction": (
+                valid_frames / len(self._resolved) if self._resolved else 0.0
+            ),
+        }
 
 
 def load_gripper_calibrations(
@@ -221,7 +338,7 @@ class GripperWidthDetector:
         self._frames += 1
         if any(count > 1 for count in counts.values()):
             self._ambiguous_frames += 1
-            return GripperMeasurement(0.0, False, None, counts)
+            return GripperMeasurement(0.0, False, None, counts, source="invalid")
 
         visible = [marker_id for marker_id in marker_ids if counts[marker_id] == 1]
         inferred = False
@@ -248,7 +365,7 @@ class GripperWidthDetector:
                 if self.calibration.symmetric_marker_midpoint_px is not None:
                     self._symmetry_geometry_mismatch_frames += 1
                 self._missing_frames += 1
-                return GripperMeasurement(0.0, False, None, counts)
+                return GripperMeasurement(0.0, False, None, counts, source="invalid")
             marker_id = visible[0]
             distance = 2.0 * float(
                 np.linalg.norm(centers[marker_id][0] - symmetric_midpoint)
@@ -257,7 +374,7 @@ class GripperWidthDetector:
             self._inferred_from_marker[marker_id] += 1
         else:
             self._missing_frames += 1
-            return GripperMeasurement(0.0, False, None, counts)
+            return GripperMeasurement(0.0, False, None, counts, source="invalid")
         width, clipped = self.calibration.width_from_distance(
             distance, int(image.shape[1])
         )
@@ -273,7 +390,14 @@ class GripperWidthDetector:
             self._clipped_low += 1
         elif clipped == "high":
             self._clipped_high += 1
-        return GripperMeasurement(width, True, distance, counts, clipped)
+        return GripperMeasurement(
+            width,
+            True,
+            distance,
+            counts,
+            clipped,
+            "symmetric_inference" if inferred else "direct",
+        )
 
     def audit(self) -> dict[str, Any]:
         distances = np.asarray(self._distances, dtype=np.float64)

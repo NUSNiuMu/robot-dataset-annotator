@@ -171,6 +171,37 @@ def _export_lerobot(args: argparse.Namespace) -> int:
     return 0
 
 
+def _export_lerobot_batch(args: argparse.Namespace) -> int:
+    from .adapters.lerobot_batch_export import (
+        export_insight_lerobot_batch,
+        load_insight_export_recordings,
+    )
+
+    recordings_manifest = args.recordings_manifest.expanduser().resolve()
+    result = export_insight_lerobot_batch(
+        recordings=load_insight_export_recordings(recordings_manifest),
+        recordings_manifest_path=recordings_manifest,
+        task_path=args.task_spec.expanduser().resolve(),
+        output=args.output.expanduser().resolve(),
+        repo_id=args.repo_id,
+        max_skew_ms=args.max_skew_ms,
+        vcodec=args.vcodec,
+        gripper_calibration_path=(
+            args.gripper_calibration.expanduser().resolve()
+            if args.gripper_calibration
+            else None
+        ),
+        maximum_gripper_interpolation_gap_frames=(
+            args.maximum_gripper_interpolation_gap_frames
+        ),
+        streaming_video_encoding=args.video_encoding_mode == "streaming",
+        encoder_queue_maxsize=args.encoder_queue_maxsize,
+        encoder_threads=args.encoder_threads,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _calibrate_qr(args: argparse.Namespace) -> int:
     from .adapters.qr_calibration import estimate_qr_transform
 
@@ -401,6 +432,41 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     export_lerobot.set_defaults(handler=_export_lerobot)
+
+    export_lerobot_batch = commands.add_parser(
+        "export-lerobot-batch",
+        help="export multiple reviewed Insight recordings as one LeRobotDataset v3",
+    )
+    export_lerobot_batch.add_argument(
+        "--recordings-manifest", type=Path, required=True
+    )
+    export_lerobot_batch.add_argument("--task-spec", type=Path, required=True)
+    export_lerobot_batch.add_argument("--output", type=Path, required=True)
+    export_lerobot_batch.add_argument("--repo-id", required=True)
+    export_lerobot_batch.add_argument("--max-skew-ms", type=float)
+    export_lerobot_batch.add_argument(
+        "--vcodec", choices=("h264", "hevc", "libsvtav1", "auto"), default="h264"
+    )
+    export_lerobot_batch.add_argument(
+        "--video-encoding-mode",
+        choices=("streaming", "staged-png"),
+        default="streaming",
+    )
+    export_lerobot_batch.add_argument(
+        "--encoder-queue-maxsize", type=int, default=256
+    )
+    export_lerobot_batch.add_argument("--encoder-threads", type=int, default=2)
+    export_lerobot_batch.add_argument("--gripper-calibration", type=Path)
+    export_lerobot_batch.add_argument(
+        "--maximum-gripper-interpolation-gap-frames",
+        type=int,
+        default=3,
+        help=(
+            "interpolate only marker dropouts no longer than this many frames "
+            "when bounded by valid measurements in the same episode"
+        ),
+    )
+    export_lerobot_batch.set_defaults(handler=_export_lerobot_batch)
 
     calibrate_qr = commands.add_parser(
         "calibrate-qr", help="estimate the global QR pose from preserved head frames"

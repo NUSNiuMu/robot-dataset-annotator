@@ -383,11 +383,11 @@ def _stream_synchronized_images(
     try:
         import rosbag2_py
     except ImportError as exc:  # pragma: no cover - optional ROS adapter
-        raise RuntimeError("rosbag2_py with MCAP support is required") from exc
+        raise RuntimeError("rosbag2_py with rosbag storage support is required") from exc
 
     reader = rosbag2_py.SequentialReader()
     reader.open(
-        rosbag2_py.StorageOptions(uri=str(source), storage_id="mcap"),
+        rosbag2_py.StorageOptions(uri=str(source), storage_id=""),
         rosbag2_py.ConverterOptions("", ""),
     )
     topic_types = {row.name: row.type for row in reader.get_all_topics_and_types()}

@@ -99,8 +99,10 @@ for both hands and for each episode:
 Accept a native jump only when Insight Global cancels it at the same frame. A shared Global jump is
 uncorrected; a later alignment update is only partially corrected; missing or discontinuous evidence
 remains `NEEDS_REVIEW`. Evaluate every later episode from its own boundaries, so an earlier drift does
-not invalidate it. Keep rejected source evidence, revise final decisions if necessary, and rerun the
-audit. Desktop-world QR, gripper-state markers, and rear multi-face camera calibration are separate
+not invalidate it. The adapter must reproduce the review manifest within 1 mm, selecting its actual
+linear-interpolation or legacy nearest-neighbor pose sampling and applying the same sampler to paired
+native VIO. Keep rejected source evidence, revise final decisions if necessary, and rerun the audit.
+Desktop-world QR, gripper-state markers, and rear multi-face camera calibration are separate
 evidence and must not replace this temporal comparison.
 
 The review adapter exposes synchronized hand poses. Gripper width remains absent until export unless
@@ -173,8 +175,9 @@ calibration or cross-take spatial consistency, but they are not temporal VIO-dri
 `REVIEW_REQUIRED` plot before excluding or reprocessing data; the visualizer must never rewrite
 poses or decisions.
 
-For a reviewed single-segment Insight MCAP, export three source camera streams and synchronized
-poses to LeRobotDataset v3.0 with explicit paths:
+For a reviewed single-segment Insight ROS 2 bag in MCAP or SQLite3 storage, export three source
+camera streams and synchronized poses to LeRobotDataset v3.0 with explicit paths. The adapter lets
+rosbag2 select the storage plugin from the bag metadata:
 
     rda export-lerobot --source <recording-dir> \
       --review-manifest <review-dir>/manifest.json \
@@ -186,6 +189,20 @@ poses to LeRobotDataset v3.0 with explicit paths:
 For any task with `episode_pose_quality`, add
 `--episode-pose-audit <review-dir>/episode_pose_quality_audit.json`. Export must stop unless the audit
 is `PASS`, every selected episode is usable, and its manifest, decisions, and task-spec hashes match.
+
+To place accepted episodes from multiple recordings in one dataset, create a schema-v1 recordings
+manifest whose ordered `recordings` array supplies `source`, `review_manifest`, `annotation_manifest`,
+`decisions`, and the required `episode_pose_audit` for every recording. Then run:
+
+    rda export-lerobot-batch --recordings-manifest <recordings.json> \
+      --task-spec <task.json> --gripper-calibration <gripper-calibration.json> \
+      --maximum-gripper-interpolation-gap-frames 3 \
+      --output <dataset-dir> --repo-id <namespace/name>
+
+This is one atomic writer operation, not a filesystem merge. Require identical FPS and video geometry,
+renumber episodes globally, and carry both `annotation.source_recording_index` and the original source
+frame on every row. Bind each recording index to its bag name, episode range, input hashes, pose audit,
+synchronization, and head calibration in `rda/export_manifest.json`.
 
 The adapter refuses an existing output and atomically promotes a temporary directory only after
 LeRobot finalization. Without a gripper calibration, its action remains the next-frame 18D
@@ -200,6 +217,11 @@ coverage, the visible marker used for inference, paired-midpoint error, clipping
 parameters, and the calibration hash. Generate
 `meta/manifest.json` and `meta/modality.json` and validate their 20D indices (left width 9, right
 width 19) before delivery.
+For the batch exporter only, a configured short-gap resolver may linearly interpolate at most three
+invalid frames when valid measurements bound the gap inside the same episode. Never interpolate across
+episodes, at an unbounded episode edge, or across a longer dropout. Store per-frame state/action source
+codes for invalid, paired-marker direct, single-marker symmetric inference, and temporal interpolation;
+validation must prove that those codes agree with validity and next-frame action semantics.
 The export also carries deterministic left/right subtask IDs, task/subtask progress, the original
 head tracking pose, and the head RGB-camera global pose obtained from the recorded static transform.
 Camera frames use direct streaming encoding by default to avoid temporary PNG disk traffic. If a

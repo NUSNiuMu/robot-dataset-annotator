@@ -74,7 +74,7 @@ NPZ 输入包含 `state` 和 `state_valid`；Insight review parquet 可改用
 阶段对齐。`cup-pick-place` 的左手阶段是接近并夹取、搬运、释放、撤离；右手阶段是投放区
 等待、接取到达的杯子、引导或稳定、撤离。静止等待的右手不能标成夹取或搬运。
 
-已知二维码黑色方形区域的实际边长后，可用保留的头部帧、相机内参、头部全局 pose 和 MCAP
+已知二维码黑色方形区域的实际边长后，可用保留的头部帧、相机内参、头部全局 pose 和 ROS 2 bag
 中的静态外参估计二维码在全局坐标系下的变换：
 
 ```bash
@@ -152,8 +152,9 @@ pose 的时间连续性、有效率和人工画面复核。二维码坐标下的
 
 ## 导出 LeRobot
 
-Insight MCAP 在完成穷尽审核后可导出为 LeRobotDataset v3.0。导出器要求 ROS 2 环境提供
-`rosbag2_py` 和 MCAP 存储插件；LeRobot 放在独立环境中安装，当前 Python 3.10 兼容的验证
+Insight ROS 2 bag（MCAP 或 SQLite3）在完成穷尽审核后可导出为 LeRobotDataset v3.0。
+导出器要求 ROS 2 环境提供 `rosbag2_py` 和源 bag 对应的存储插件，读取时由 rosbag2 根据
+`metadata.yaml` 自动选择存储格式；LeRobot 放在独立环境中安装，当前 Python 3.10 兼容的验证
 版本固定为 0.4.4：
 
 ```bash
@@ -170,8 +171,42 @@ Insight MCAP 在完成穷尽审核后可导出为 LeRobotDataset v3.0。导出�
   --repo-id local/recording-segmented
 ```
 
+需要把多个已审核录制中的全部合格 episode 写成一个数据集时，先建立路径显式的批量清单。
+清单顺序决定 `annotation.source_recording_index`，每条录制仍须提供自身的 decisions 和
+任务要求的逐 episode pose 审计：
+
+```json
+{
+  "schema_version": 1,
+  "recordings": [
+    {
+      "source": "recordings/take-0001",
+      "review_manifest": "reviews/take-0001/manifest.json",
+      "annotation_manifest": "reviews/take-0001/annotation_manifest.json",
+      "decisions": "reviews/take-0001/decisions.json",
+      "episode_pose_audit": "reviews/take-0001/episode_pose_quality_audit.json"
+    }
+  ]
+}
+```
+
+```bash
+.venv/bin/rda export-lerobot-batch \
+  --recordings-manifest recordings.json \
+  --task-spec .rda/screw-nut-sorting.json \
+  --gripper-calibration configs/umi-insight3-gripper.json \
+  --maximum-gripper-interpolation-gap-frames 3 \
+  --output outputs/screw-nut-sorting-lerobot-v3 \
+  --repo-id local/screw-nut-sorting
+```
+
+批量导出要求所有录制使用相同 FPS 和三路相机几何尺寸，全局重编号 episode，并在每帧保留
+来源录制索引和源帧索引。`rda/export_manifest.json` 保存索引到 bag 名称、各录制输入哈希、
+同步、头部外参、pose 修复和夹爪检测审计的映射；任一录制缺少任务要求的 PASS pose 审计时，
+整个原子导出都会停止。
+
 输出包含左右手和头部三路独立视频、双手状态、9 维头部 tracking pose、应用
-MCAP 静态外参后的 9 维头部 RGB 相机全局 pose、有效性掩码、源帧索引和原子动作索引。
+ROS 2 bag 静态外参后的 9 维头部 RGB 相机全局 pose、有效性掩码、源帧索引和原子动作索引。
 未传 `--gripper-calibration` 时双手状态维持原有 18D pose。传入标定时，导出器在左右腕图中
 检测 `DICT_4X4_50` 的 0/1 号 marker，把中心像素距离映射为 `0–0.083 m` 的物理开口宽度，
 并在每只手的 9D pose 后插入宽度，形成 20D state/action。两个 marker 均唯一检测到时直接
@@ -180,6 +215,10 @@ MCAP 静态外参后的 9 维头部 RGB 相机全局 pose、有效性掩码、�
 由 validity mask 标出。direct/inferred 帧数、推算所用 marker、成对中点误差、端点裁剪、
 原始距离和检测覆盖率均写入审计清单。`action` 是下一帧完整双手状态；episode 最后一帧保持
 当前状态。pose 仍处于源追踪坐标系，且未经过机器人重定向。
+批量导出还可在同一 episode 内对前后均有可靠值的短缺失做线性插值，默认最多 3 帧；它不跨
+episode，不填充开头、结尾或更长缺失。每帧 state/action 的夹爪来源用独立代码区分 invalid、
+双 marker 直接测量、单 marker 对称推算和短缺失插值，验证器会核对来源代码、validity mask
+与 next-frame action 的一致性。
 每帧还包含左右手独立 subtask ID、左右手 subtask 内进度和整体操作进度；ID 到英文语义的
 映射写入 `rda/export_manifest.json`。导出器同时生成 `meta/manifest.json` 和
 `meta/modality.json`，记录维度、夹爪物理语义、标定参数及字段分组。二维码上下文的整体操作进度固定为 0，正式任务区间从
@@ -187,7 +226,7 @@ MCAP 静态外参后的 9 维头部 RGB 相机全局 pose、有效性掩码、�
 头部 pose 默认按相机名推断对应的 `<name>_camera_imu` tracking frame；设备命名不符合该规则
 时，导出和二维码标定都应显式传入 `--head-pose-child-frame`。
 导出使用同目录临时产物完成后原子改名，拒绝覆盖已有数据集。
-默认使用流式视频编码：相机帧从 MCAP 解码后直接送入三路编码器，避免先写临时 PNG 再
+默认使用流式视频编码：相机帧从 ROS 2 bag 解码后直接送入三路编码器，避免先写临时 PNG 再
 读回的磁盘往返，并在 `rda/export_manifest.json` 中记录 `video_encoding_mode`。每路编码器
 默认使用 256 帧的有界队列，吸收头部高清流的短时编码积压；可用
 `--encoder-queue-maxsize` 调整。每路编码器默认限制为 2 个线程，避免三路相机或批量导出
@@ -236,7 +275,9 @@ skills/          可随仓库复制或安装的标准 Codex Skill
 前逐 episode 对比双手 native VIO 与 Insight Global：native 跳变若被 Global 在同一帧抵消，
 该 episode 可标记 `PASS_AFTER_CORRECTION`；Global 同步跳变、延迟到后续帧才重新对齐、证据
 缺失或对齐本身不连续时，该 episode 保持 `NEEDS_REVIEW`。每轮独立判断，前一轮漂移不会自动
-判废后续轮次。
+判废后续轮次。审计器会核对源 bag 能否在 1 mm 内复现 review manifest，并自动识别该
+manifest 使用的是线性插值还是旧版最近邻 pose 采样；native VIO 会使用相同方式重采样，避免
+把采样器差异误报成轨迹质量问题。
 
 ```bash
 .venv/bin/rda audit-insight-episode-poses \
