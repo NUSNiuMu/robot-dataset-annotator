@@ -275,6 +275,8 @@ def _visualize_trajectories(args: argparse.Namespace) -> int:
     result = visualize_trajectory_batch(
         input_root=args.input_root,
         recordings_manifest=args.recordings_manifest,
+        per_episode=args.per_episode,
+        task_spec=args.task_spec,
         output=args.output,
         write_png=args.write_png,
         maximum_points=args.maximum_points,
@@ -561,6 +563,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--recordings-manifest",
         type=Path,
         help="load the exact review artifacts referenced by a batch manifest",
+    )
+    visualize_trajectories.add_argument(
+        "--per-episode",
+        action="store_true",
+        help="render each final retained episode as a separate dashboard record",
+    )
+    visualize_trajectories.add_argument(
+        "--task-spec",
+        type=Path,
+        help="task semantics required by --per-episode",
     )
     visualize_trajectories.add_argument("--output", type=Path, required=True)
     visualize_trajectories.add_argument(

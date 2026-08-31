@@ -148,9 +148,14 @@ pose 流中存在已确认的大幅坐标跳变，其前后独立出现的中等
 ```bash
 .venv/bin/rda visualize-trajectories \
   --recordings-manifest outputs/batch/recordings_manifest.json \
+  --per-episode \
+  --task-spec src/robot_dataset_annotator/task_specs/screw-nut-sorting.json \
   --output outputs/batch/trajectory-qc \
   --write-png
 ```
+
+`--per-episode` 让网页按最终 decisions 中保留的全局 episode 编号逐条切换，并在详情中保留
+来源帧范围、atomic action 和左右手 subtask；不传该参数时仍按录制汇总展示。
 
 输出包括可拖动旋转和缩放的 `index.html`、详细 `report.json`、表格 `summary.csv`，以及可选
 的逐 take PNG 和总览图。HTML 和逐 take PNG 只绘制最终 decisions 选择的 context/训练区间，

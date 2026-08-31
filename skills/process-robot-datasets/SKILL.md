@@ -172,6 +172,9 @@ readable QC report from the reviewed recording root:
 For a multi-recording export, prefer `--recordings-manifest <path>` instead of `--input-root`.
 This loads the exact review manifest, decisions, and episode pose audit selected for that dataset,
 including corrected manifests from an expansion review, without rediscovering stale review files.
+When the user needs to recheck final retained episodes, add `--per-episode --task-spec <task.json>`.
+The dashboard must then create one record per final decisions episode, using global episode numbers
+and retaining source-frame, atomic-action, and independent left/right subtask semantics.
 
 Select the corrected manifest referenced by a final PASS audit; do not select files by a filename
 guess when earlier `NEEDS_REVIEW` or pre-settling artifacts coexist. When `qr_transform.json` is

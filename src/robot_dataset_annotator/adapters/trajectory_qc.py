@@ -170,6 +170,7 @@ def _role_metrics(
     arrays = {
         "raw": raw,
         "corrected": corrected,
+        "quaternions_xyzw": quaternions,
         "valid": valid,
         "training_frames": selected_valid,
         "correction_mask": correction_mask,
@@ -379,6 +380,8 @@ def _record_for_paths(
         minimum_valid_fraction=minimum_valid_fraction,
     )
     record = {
+        "record_id": take_name,
+        "label": take_name,
         "take": take_name,
         "review_directory": str(review.resolve()),
         "decisions_file": str(decisions_path.resolve()),
@@ -429,9 +432,144 @@ def _record_for_take(
     )
 
 
-def _html(records: list[dict[str, Any]], task_id: str) -> str:
+def _phase_semantics(
+    definitions: list[dict[str, Any]], boundaries: list[int]
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "index": index,
+            "key": definition["key"],
+            "label": definition.get("label", definition["key"]),
+            "start_frame": int(boundaries[index]),
+            "end_frame_exclusive": int(boundaries[index + 1]),
+        }
+        for index, definition in enumerate(definitions)
+    ]
+
+
+def _episode_record(
+    record: dict[str, Any],
+    arrays_by_role: dict[str, dict[str, np.ndarray]],
+    episode: dict[str, Any],
+    *,
+    local_episode_index: int,
+    global_episode_index: int,
+    task_spec: dict[str, Any],
+    maximum_points: int,
+    hand_step_warning_m: float,
+    head_step_warning_m: float,
+    minimum_valid_fraction: float,
+) -> tuple[dict[str, Any], dict[str, dict[str, np.ndarray]]]:
+    start = int(episode.get("context_start_frame", episode["episode_start_frame"]))
+    end = int(episode["episode_end_frame_exclusive"])
+    ranges = [(start, end)]
+    role_metrics: dict[str, dict[str, Any]] = {}
+    episode_arrays_by_role: dict[str, dict[str, np.ndarray]] = {}
+    tracks: dict[str, dict[str, Any]] = {}
+    for role in ROLES:
+        source = arrays_by_role[role]
+        pose = {
+            "positions": source["corrected"],
+            "raw_positions": source["raw"],
+            "quaternions_xyzw": source["quaternions_xyzw"],
+            "valid": source["valid"],
+            "pose_correction_mask": source["correction_mask"],
+        }
+        metrics, arrays = _role_metrics(pose, ranges, float(record["fps"]))
+        arrays["raw_display"] = source["raw_display"]
+        arrays["corrected_display"] = source["corrected_display"]
+        selected_valid = arrays["training_frames"]
+        selected_positions = arrays["corrected_display"][selected_valid]
+        metrics["training_centroid"] = (
+            np.median(selected_positions, axis=0).tolist()
+            if len(selected_positions)
+            else None
+        )
+        role_metrics[role] = metrics
+        episode_arrays_by_role[role] = arrays
+        tracks[role] = {
+            "color": ROLE_COLORS[role],
+            "raw": _downsample(arrays["raw_display"][selected_valid], maximum_points),
+            "corrected": _downsample(
+                arrays["corrected_display"][selected_valid], maximum_points
+            ),
+            "corrections": _downsample(
+                arrays["corrected_display"][selected_valid & arrays["correction_mask"]],
+                min(maximum_points, 200),
+            ),
+        }
+    selected_frames = np.zeros(len(arrays_by_role["head"]["valid"]), dtype=bool)
+    selected_frames[start:end] = True
+    for role in ("left_hand", "right_hand"):
+        valid = (
+            selected_frames
+            & arrays_by_role[role]["valid"]
+            & arrays_by_role["head"]["valid"]
+        )
+        distances = np.linalg.norm(
+            arrays_by_role[role]["corrected"][valid]
+            - arrays_by_role["head"]["corrected"][valid],
+            axis=1,
+        )
+        role_metrics[role]["training_head_distance_p99_m"] = _safe_quantile(
+            distances, 0.99
+        )
+        role_metrics[role]["training_head_distance_maximum_m"] = _safe_max(distances)
+    role_metrics["head"]["training_head_distance_p99_m"] = 0.0
+    role_metrics["head"]["training_head_distance_maximum_m"] = 0.0
+    rating, reasons = _initial_rating(
+        record["visual_status"],
+        role_metrics,
+        record["qr_quality"],
+        hand_step_warning_m=hand_step_warning_m,
+        head_step_warning_m=head_step_warning_m,
+        minimum_valid_fraction=minimum_valid_fraction,
+    )
+    atomic_boundaries = [int(value) for value in episode["atomic_boundaries"]]
+    hand_boundaries = episode["hand_subtask_boundaries"]
+    episode_metadata = {
+        "global_episode_index": global_episode_index,
+        "local_episode_index": local_episode_index,
+        "context_start_frame": start,
+        "episode_start_frame": int(episode["episode_start_frame"]),
+        "episode_end_frame_exclusive": end,
+        "task_id": task_spec["task_id"],
+        "atomic_actions": _phase_semantics(
+            task_spec["atomic_actions"], atomic_boundaries
+        ),
+        "hand_subtasks": {
+            hand: _phase_semantics(
+                task_spec["hand_subtasks"][hand],
+                [int(value) for value in hand_boundaries[hand]],
+            )
+            for hand in ("left_hand", "right_hand")
+        },
+    }
+    label = (
+        f"episode {global_episode_index:03d} | "
+        f"{record['take'].split('_2026')[0]} local {local_episode_index}"
+    )
+    episode_record = {
+        **record,
+        "record_id": f"episode_{global_episode_index:03d}",
+        "label": label,
+        "rating": rating,
+        "rating_reasons": reasons,
+        "episodes": 1,
+        "episode": episode_metadata,
+        "roles": role_metrics,
+        "tracks": tracks,
+    }
+    return episode_record, episode_arrays_by_role
+
+
+def _html(
+    records: list[dict[str, Any]], task_id: str, *, per_episode: bool = False
+) -> str:
     payload = json.dumps(records, ensure_ascii=False, separators=(",", ":"))
     title = f"{task_id} 3D trajectory QC"
+    selector_label = "Episode" if per_episode else "Take"
+    record_header = "记录" if per_episode else "take"
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -463,7 +601,7 @@ pre {{ white-space: pre-wrap; max-height: 300px; overflow: auto; font-size: 12px
 <main>
 <section class="panel">
 <div class="controls">
-<label>Take <select id="take"></select></label>
+<label>{selector_label} <select id="take"></select></label>
 <label><input id="raw" type="checkbox" checked> raw</label>
 <label><input id="corrected" type="checkbox" checked> corrected</label>
 <label>进度 <input id="progress" type="range" min="1" max="100" value="100"></label>
@@ -473,7 +611,7 @@ pre {{ white-space: pre-wrap; max-height: 300px; overflow: auto; font-size: 12px
 <div class="legend"><span style="color:#ff8c42">左手</span><span style="color:#29b6f6">右手</span><span style="color:#d66efd">头部</span><span style="color:#ffe66d">修正区域</span></div>
 <pre id="detail"></pre>
 </section>
-<section class="panel"><table><thead><tr><th>take</th><th>评级</th><th>episode</th><th>最大训练步长 L/R/H (m)</th></tr></thead><tbody id="rows"></tbody></table></section>
+<section class="panel"><table><thead><tr><th>{record_header}</th><th>评级</th><th>episode</th><th>最大训练步长 L/R/H (m)</th></tr></thead><tbody id="rows"></tbody></table></section>
 </main>
 <script>
 const records={payload};
@@ -481,14 +619,14 @@ const canvas=document.getElementById('view'), ctx=canvas.getContext('2d');
 const select=document.getElementById('take'), rawBox=document.getElementById('raw'), correctedBox=document.getElementById('corrected');
 const progress=document.getElementById('progress'), detail=document.getElementById('detail');
 let yaw=-0.7,pitch=0.45,zoom=1.0,drag=false,lastX=0,lastY=0;
-for (const [i,r] of records.entries()) {{ const o=document.createElement('option'); o.value=i; o.textContent=r.take; select.appendChild(o); }}
+for (const [i,r] of records.entries()) {{ const o=document.createElement('option'); o.value=i; o.textContent=r.label||r.take; select.appendChild(o); }}
 function rotate(p) {{ let [x,y,z]=p; const cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch); let x1=cy*x-sy*y,y1=sy*x+cy*y; return [x1,cp*y1-sp*z,sp*y1+cp*z]; }}
 function currentPoints(r) {{ const pts=[]; for (const role of Object.keys(r.tracks)) {{ if(rawBox.checked) pts.push(...r.tracks[role].raw); if(correctedBox.checked) pts.push(...r.tracks[role].corrected); }} return pts; }}
 function drawLine(points,color,dashed,center,scale,fraction) {{ const count=Math.max(1,Math.floor(points.length*fraction)); if(count<2)return; ctx.beginPath();ctx.strokeStyle=color;ctx.globalAlpha=dashed?0.28:0.9;ctx.lineWidth=dashed?1.2:2.2;ctx.setLineDash(dashed?[7,5]:[]); for(let i=0;i<count;i++){{const q=rotate([points[i][0]-center[0],points[i][1]-center[1],points[i][2]-center[2]]);const x=canvas.width/2+q[0]*scale,y=canvas.height/2-q[1]*scale;if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);}}ctx.stroke();ctx.globalAlpha=1;ctx.setLineDash([]); }}
 function drawAxis(center,scale) {{ const axes=[[[0,0,0],[.25,0,0],'#f66','X'],[[0,0,0],[0,.25,0],'#6e8','Y'],[[0,0,0],[0,0,.25],'#69f','Z']]; for(const [a,b,c,l] of axes){{const aa=rotate(a),bb=rotate(b);ctx.strokeStyle=c;ctx.beginPath();ctx.moveTo(canvas.width/2+aa[0]*scale,canvas.height/2-aa[1]*scale);ctx.lineTo(canvas.width/2+bb[0]*scale,canvas.height/2-bb[1]*scale);ctx.stroke();ctx.fillStyle=c;ctx.fillText(l,canvas.width/2+bb[0]*scale,canvas.height/2-bb[1]*scale);}} }}
-function draw() {{ const r=records[+select.value||0], pts=currentPoints(r);ctx.clearRect(0,0,canvas.width,canvas.height);if(!pts.length)return;const lo=[0,1,2].map(k=>Math.min(...pts.map(p=>p[k]))),hi=[0,1,2].map(k=>Math.max(...pts.map(p=>p[k]))),center=lo.map((v,k)=>(v+hi[k])/2),span=Math.max(...hi.map((v,k)=>v-lo[k]),.1),scale=620/span*zoom,fraction=+progress.value/100;drawAxis(center,scale);for(const role of ['left_hand','right_hand','head']){{const t=r.tracks[role];if(rawBox.checked)drawLine(t.raw,t.color,true,center,scale,fraction);if(correctedBox.checked)drawLine(t.corrected,t.color,false,center,scale,fraction);}}ctx.fillStyle='#d9e3f0';ctx.font='16px sans-serif';ctx.fillText(`${{r.take}}  (${{r.coordinate_frame}} frame)`,18,28);detail.textContent=JSON.stringify({{rating:r.rating,reasons:r.rating_reasons,qr_quality:r.qr_quality,roles:r.roles}},null,2); }}
+function draw() {{ const r=records[+select.value||0], pts=currentPoints(r);ctx.clearRect(0,0,canvas.width,canvas.height);if(!pts.length)return;const lo=[0,1,2].map(k=>Math.min(...pts.map(p=>p[k]))),hi=[0,1,2].map(k=>Math.max(...pts.map(p=>p[k]))),center=lo.map((v,k)=>(v+hi[k])/2),span=Math.max(...hi.map((v,k)=>v-lo[k]),.1),scale=620/span*zoom,fraction=+progress.value/100;drawAxis(center,scale);for(const role of ['left_hand','right_hand','head']){{const t=r.tracks[role];if(rawBox.checked)drawLine(t.raw,t.color,true,center,scale,fraction);if(correctedBox.checked)drawLine(t.corrected,t.color,false,center,scale,fraction);}}ctx.fillStyle='#d9e3f0';ctx.font='16px sans-serif';ctx.fillText(`${{r.label||r.take}}  (${{r.coordinate_frame}} frame)`,18,28);detail.textContent=JSON.stringify({{episode:r.episode||null,rating:r.rating,reasons:r.rating_reasons,qr_quality:r.qr_quality,roles:r.roles}},null,2); }}
 function selectRecord(i) {{ select.value=i; draw(); }}
-const tbody=document.getElementById('rows');records.forEach((r,i)=>{{const tr=document.createElement('tr');const steps=['left_hand','right_hand','head'].map(k=>r.roles[k].training_corrected_maximum_step_m.toFixed(3)).join(' / ');tr.innerHTML=`<td>${{r.take.match(/take_\\d+/)?.[0]||r.take}}</td><td class="${{r.rating}}">${{r.rating}}</td><td>${{r.episodes}}</td><td>${{steps}}</td>`;tr.onclick=()=>selectRecord(i);tbody.appendChild(tr);}});
+const tbody=document.getElementById('rows');records.forEach((r,i)=>{{const tr=document.createElement('tr');const steps=['left_hand','right_hand','head'].map(k=>r.roles[k].training_corrected_maximum_step_m.toFixed(3)).join(' / ');const ep=r.episode?.global_episode_index??r.episodes;tr.innerHTML=`<td>${{r.label||r.take.match(/take_\\d+/)?.[0]||r.take}}</td><td class="${{r.rating}}">${{r.rating}}</td><td>${{ep}}</td><td>${{steps}}</td>`;tr.onclick=()=>selectRecord(i);tbody.appendChild(tr);}});
 for(const el of [select,rawBox,correctedBox,progress])el.oninput=draw;document.getElementById('reset').onclick=()=>{{yaw=-.7;pitch=.45;zoom=1;draw();}};
 canvas.onmousedown=e=>{{drag=true;lastX=e.clientX;lastY=e.clientY;canvas.style.cursor='grabbing';}};window.onmouseup=()=>{{drag=false;canvas.style.cursor='grab';}};window.onmousemove=e=>{{if(!drag)return;yaw+=(e.clientX-lastX)*.008;pitch=Math.max(-1.45,Math.min(1.45,pitch+(e.clientY-lastY)*.008));lastX=e.clientX;lastY=e.clientY;draw();}};canvas.onwheel=e=>{{e.preventDefault();zoom=Math.max(.3,Math.min(5,zoom*Math.exp(-e.deltaY*.001)));draw();}};
 draw();
@@ -593,7 +731,7 @@ def _write_take_png(
     correction_axis.grid(alpha=0.2)
     correction_axis.legend(fontsize=8)
     reasons = "; ".join(record["rating_reasons"]) or "no automatic warning"
-    title = f"{record['take']} — {record['rating']} — {reasons}"
+    title = f"{record['label']} — {record['rating']} — {reasons}"
     figure.suptitle(title, fontsize=12)
     figure.savefig(path, dpi=110)
     plt.close(figure)
@@ -618,10 +756,10 @@ def _write_overview(
         "NOT_TRAINING": "#aab4c3",
     }
     for axis, record in zip(axes_array, records, strict=False):
-        image = plt.imread(plots / f"{record['take']}.png")
+        image = plt.imread(plots / f"{record['record_id']}.png")
         axis.imshow(image)
         axis.set_title(
-            f"{record['take'].split('_2026')[0]}\n{record['rating']}",
+            f"{record['label']}\n{record['rating']}",
             fontsize=8,
             color=status_colors[record["rating"]],
         )
@@ -686,6 +824,8 @@ def visualize_trajectory_batch(
     *,
     input_root: Path | None,
     recordings_manifest: Path | None = None,
+    per_episode: bool = False,
+    task_spec: Path | None = None,
     output: Path,
     write_png: bool = False,
     maximum_points: int = 800,
@@ -696,15 +836,22 @@ def visualize_trajectory_batch(
 ) -> dict[str, Any]:
     if (input_root is None) == (recordings_manifest is None):
         raise ValueError("provide exactly one of input_root or recordings_manifest")
+    if per_episode and (recordings_manifest is None or task_spec is None):
+        raise ValueError(
+            "per_episode requires recordings_manifest and task_spec"
+        )
     input_root = input_root.expanduser().resolve() if input_root else None
     recordings_manifest = (
         recordings_manifest.expanduser().resolve() if recordings_manifest else None
     )
+    task_spec = task_spec.expanduser().resolve() if task_spec else None
     output = output.expanduser().resolve()
     if input_root is not None and not input_root.is_dir():
         raise ValueError(f"input root does not exist: {input_root}")
     if recordings_manifest is not None and not recordings_manifest.is_file():
         raise ValueError(f"recordings manifest does not exist: {recordings_manifest}")
+    if task_spec is not None and not task_spec.is_file():
+        raise ValueError(f"task spec does not exist: {task_spec}")
     if output.exists():
         raise FileExistsError(f"refusing to overwrite {output}")
     if maximum_points < 10:
@@ -714,6 +861,8 @@ def visualize_trajectory_batch(
     records: list[dict[str, Any]] = []
     arrays_by_take: dict[str, dict[str, dict[str, np.ndarray]]] = {}
     task_ids: set[str] = set()
+    task_payload = read_json(task_spec) if task_spec else None
+    global_episode_index = 0
     try:
         if input_root is not None:
             takes = sorted(
@@ -782,17 +931,43 @@ def visualize_trajectory_batch(
                     hand_head_distance_warning_m=hand_head_distance_warning_m,
                     minimum_valid_fraction=minimum_valid_fraction,
                 )
-                records.append(record)
-                arrays_by_take[take_name] = arrays
+                if per_episode:
+                    episodes = decisions["reviews"][0]["episodes"]
+                    for local_episode_index, episode in enumerate(episodes):
+                        episode_row, episode_arrays = _episode_record(
+                            record,
+                            arrays,
+                            episode,
+                            local_episode_index=local_episode_index,
+                            global_episode_index=(
+                                global_episode_index + local_episode_index
+                            ),
+                            task_spec=task_payload,
+                            maximum_points=maximum_points,
+                            hand_step_warning_m=hand_step_warning_m,
+                            head_step_warning_m=head_step_warning_m,
+                            minimum_valid_fraction=minimum_valid_fraction,
+                        )
+                        records.append(episode_row)
+                        arrays_by_take[episode_row["record_id"]] = episode_arrays
+                    global_episode_index += len(episodes)
+                else:
+                    records.append(record)
+                    arrays_by_take[record["record_id"]] = arrays
         if len(task_ids) != 1:
             raise ValueError(
                 f"trajectory batch must contain one task_id: {sorted(task_ids)}"
             )
         task_id = next(iter(task_ids))
+        if task_payload and task_payload.get("task_id") != task_id:
+            raise ValueError(
+                f"task spec {task_payload.get('task_id')} does not match {task_id}"
+            )
         _robust_centroid_scores(records)
         report = {
             "schema_version": 1,
             "task_id": task_id,
+            "granularity": "episode" if per_episode else "recording",
             "input_root": str(input_root) if input_root else None,
             "recordings_manifest": (
                 str(recordings_manifest) if recordings_manifest else None
@@ -819,7 +994,7 @@ def visualize_trajectory_batch(
         }
         write_json_atomic(temporary / "report.json", report)
         (temporary / "index.html").write_text(
-            _html(records, task_id), encoding="utf-8"
+            _html(records, task_id, per_episode=per_episode), encoding="utf-8"
         )
         _write_summary_csv(temporary / "summary.csv", records)
         if write_png:
@@ -827,9 +1002,9 @@ def visualize_trajectory_batch(
             plots.mkdir()
             for record in records:
                 _write_take_png(
-                    plots / f"{record['take']}.png",
+                    plots / f"{record['record_id']}.png",
                     record,
-                    arrays_by_take[record["take"]],
+                    arrays_by_take[record["record_id"]],
                     hand_step_warning_m=hand_step_warning_m,
                     head_step_warning_m=head_step_warning_m,
                 )
