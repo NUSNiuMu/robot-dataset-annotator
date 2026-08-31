@@ -292,25 +292,27 @@ def _robust_centroid_scores(records: list[dict[str, Any]]) -> None:
                 )
 
 
-def _record_for_take(
-    take: Path,
+def _record_for_paths(
     *,
+    take_name: str,
+    review: Path,
+    decisions_path: Path,
+    corrected_path: Path,
+    audit_path: Path,
+    audit: dict[str, Any],
+    qr_path: Path | None,
     maximum_points: int,
     hand_step_warning_m: float,
     head_step_warning_m: float,
     hand_head_distance_warning_m: float,
     minimum_valid_fraction: float,
 ) -> tuple[dict[str, Any], dict[str, dict[str, np.ndarray]]]:
-    review = _select_review(take)
-    decisions_path = review / "decisions.json"
     decisions = read_json(decisions_path)
     visual_status = str(decisions["reviews"][0]["visual_status"])
-    audit_path, audit, corrected_path = _select_pass_audit(review)
     manifest = read_json(corrected_path)
     fps = float(manifest["fps"])
     ranges = _episode_ranges(decisions)
-    qr_path = review / "qr_transform.json"
-    qr = read_json(qr_path) if qr_path.is_file() else None
+    qr = read_json(qr_path) if qr_path and qr_path.is_file() else None
     qr_from_global = (
         np.asarray(qr["qr_from_global"], dtype=np.float64) if qr else np.eye(4)
     )
@@ -377,7 +379,7 @@ def _record_for_take(
         minimum_valid_fraction=minimum_valid_fraction,
     )
     record = {
-        "take": take.name,
+        "take": take_name,
         "review_directory": str(review.resolve()),
         "decisions_file": str(decisions_path.resolve()),
         "pose_audit_file": str(audit_path.resolve()),
@@ -398,14 +400,44 @@ def _record_for_take(
     return record, arrays_by_role
 
 
-def _html(records: list[dict[str, Any]]) -> str:
+def _record_for_take(
+    take: Path,
+    *,
+    maximum_points: int,
+    hand_step_warning_m: float,
+    head_step_warning_m: float,
+    hand_head_distance_warning_m: float,
+    minimum_valid_fraction: float,
+) -> tuple[dict[str, Any], dict[str, dict[str, np.ndarray]]]:
+    review = _select_review(take)
+    decisions_path = review / "decisions.json"
+    audit_path, audit, corrected_path = _select_pass_audit(review)
+    qr_path = review / "qr_transform.json"
+    return _record_for_paths(
+        take_name=take.name,
+        review=review,
+        decisions_path=decisions_path,
+        corrected_path=corrected_path,
+        audit_path=audit_path,
+        audit=audit,
+        qr_path=qr_path if qr_path.is_file() else None,
+        maximum_points=maximum_points,
+        hand_step_warning_m=hand_step_warning_m,
+        head_step_warning_m=head_step_warning_m,
+        hand_head_distance_warning_m=hand_head_distance_warning_m,
+        minimum_valid_fraction=minimum_valid_fraction,
+    )
+
+
+def _html(records: list[dict[str, Any]], task_id: str) -> str:
     payload = json.dumps(records, ensure_ascii=False, separators=(",", ":"))
+    title = f"{task_id} 3D trajectory QC"
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Cup pick/place trajectory QC</title>
+<title>{title}</title>
 <style>
 :root {{ color-scheme: dark; font-family: Inter, system-ui, sans-serif; }}
 body {{ margin: 0; background: #0b1018; color: #e7edf7; }}
@@ -426,7 +458,7 @@ pre {{ white-space: pre-wrap; max-height: 300px; overflow: auto; font-size: 12px
 </style>
 </head>
 <body>
-<header><h2 style="margin:0">Cup pick/place 3D trajectory QC</h2>
+<header><h2 style="margin:0">{title}</h2>
 <div>拖动旋转，滚轮缩放。虚线为 raw，实线为 corrected；坐标优先使用二维码坐标系。</div></header>
 <main>
 <section class="panel">
@@ -567,7 +599,9 @@ def _write_take_png(
     plt.close(figure)
 
 
-def _write_overview(path: Path, records: list[dict[str, Any]], plots: Path) -> None:
+def _write_overview(
+    path: Path, records: list[dict[str, Any]], plots: Path, task_id: str
+) -> None:
     import matplotlib
 
     matplotlib.use("Agg")
@@ -594,7 +628,7 @@ def _write_overview(path: Path, records: list[dict[str, Any]], plots: Path) -> N
         axis.axis("off")
     for axis in axes_array[len(records) :]:
         axis.axis("off")
-    figure.suptitle("Cup pick/place trajectory QC overview", fontsize=18)
+    figure.suptitle(f"{task_id} trajectory QC overview", fontsize=18)
     figure.tight_layout()
     figure.savefig(path, dpi=100)
     plt.close(figure)
@@ -650,7 +684,8 @@ def _write_summary_csv(path: Path, records: list[dict[str, Any]]) -> None:
 
 def visualize_trajectory_batch(
     *,
-    input_root: Path,
+    input_root: Path | None,
+    recordings_manifest: Path | None = None,
     output: Path,
     write_png: bool = False,
     maximum_points: int = 800,
@@ -659,10 +694,17 @@ def visualize_trajectory_batch(
     hand_head_distance_warning_m: float = 1.25,
     minimum_valid_fraction: float = 0.95,
 ) -> dict[str, Any]:
-    input_root = input_root.expanduser().resolve()
+    if (input_root is None) == (recordings_manifest is None):
+        raise ValueError("provide exactly one of input_root or recordings_manifest")
+    input_root = input_root.expanduser().resolve() if input_root else None
+    recordings_manifest = (
+        recordings_manifest.expanduser().resolve() if recordings_manifest else None
+    )
     output = output.expanduser().resolve()
-    if not input_root.is_dir():
+    if input_root is not None and not input_root.is_dir():
         raise ValueError(f"input root does not exist: {input_root}")
+    if recordings_manifest is not None and not recordings_manifest.is_file():
+        raise ValueError(f"recordings manifest does not exist: {recordings_manifest}")
     if output.exists():
         raise FileExistsError(f"refusing to overwrite {output}")
     if maximum_points < 10:
@@ -671,29 +713,90 @@ def visualize_trajectory_batch(
     temporary.mkdir(parents=True)
     records: list[dict[str, Any]] = []
     arrays_by_take: dict[str, dict[str, dict[str, np.ndarray]]] = {}
+    task_ids: set[str] = set()
     try:
-        takes = sorted(
-            path
-            for path in input_root.iterdir()
-            if path.is_dir() and list(path.glob("review*/decisions.json"))
-        )
-        if not takes:
-            raise ValueError(f"no reviewed recordings found under {input_root}")
-        for take in takes:
-            record, arrays = _record_for_take(
-                take,
-                maximum_points=maximum_points,
-                hand_step_warning_m=hand_step_warning_m,
-                head_step_warning_m=head_step_warning_m,
-                hand_head_distance_warning_m=hand_head_distance_warning_m,
-                minimum_valid_fraction=minimum_valid_fraction,
+        if input_root is not None:
+            takes = sorted(
+                path
+                for path in input_root.iterdir()
+                if path.is_dir() and list(path.glob("review*/decisions.json"))
             )
-            records.append(record)
-            arrays_by_take[take.name] = arrays
+            if not takes:
+                raise ValueError(f"no reviewed recordings found under {input_root}")
+            for take in takes:
+                record, arrays = _record_for_take(
+                    take,
+                    maximum_points=maximum_points,
+                    hand_step_warning_m=hand_step_warning_m,
+                    head_step_warning_m=head_step_warning_m,
+                    hand_head_distance_warning_m=hand_head_distance_warning_m,
+                    minimum_valid_fraction=minimum_valid_fraction,
+                )
+                decisions = read_json(Path(record["decisions_file"]))
+                task_ids.add(str(decisions.get("task_id", "unknown-task")))
+                records.append(record)
+                arrays_by_take[take.name] = arrays
+        else:
+            batch = read_json(recordings_manifest)
+            rows = batch.get("recordings", [])
+            if not rows:
+                raise ValueError(f"no recordings found in {recordings_manifest}")
+            for row in rows:
+                corrected_path = Path(str(row["review_manifest"])).resolve()
+                decisions_path = Path(str(row["decisions"])).resolve()
+                episode_audit_path = Path(str(row["episode_pose_audit"])).resolve()
+                audit_path = episode_audit_path
+                audit = read_json(episode_audit_path)
+                correction_path = (
+                    corrected_path.parent / "pose_drift_correction_audit.json"
+                )
+                if correction_path.is_file():
+                    correction = read_json(correction_path)
+                    referenced = Path(str(correction.get("corrected_manifest", "")))
+                    if (
+                        correction.get("status") == "PASS"
+                        and referenced.resolve() == corrected_path
+                    ):
+                        audit_path = correction_path
+                        audit = correction
+                annotation_path = Path(str(row["annotation_manifest"])).resolve()
+                qr_candidates = (
+                    corrected_path.parent / "qr_transform.json",
+                    annotation_path.parent / "qr_transform.json",
+                )
+                qr_path = next((path for path in qr_candidates if path.is_file()), None)
+                decisions = read_json(decisions_path)
+                task_ids.add(str(decisions.get("task_id", "unknown-task")))
+                take_name = Path(str(row["source"])).name
+                record, arrays = _record_for_paths(
+                    take_name=take_name,
+                    review=decisions_path.parent,
+                    decisions_path=decisions_path,
+                    corrected_path=corrected_path,
+                    audit_path=audit_path,
+                    audit=audit,
+                    qr_path=qr_path,
+                    maximum_points=maximum_points,
+                    hand_step_warning_m=hand_step_warning_m,
+                    head_step_warning_m=head_step_warning_m,
+                    hand_head_distance_warning_m=hand_head_distance_warning_m,
+                    minimum_valid_fraction=minimum_valid_fraction,
+                )
+                records.append(record)
+                arrays_by_take[take_name] = arrays
+        if len(task_ids) != 1:
+            raise ValueError(
+                f"trajectory batch must contain one task_id: {sorted(task_ids)}"
+            )
+        task_id = next(iter(task_ids))
         _robust_centroid_scores(records)
         report = {
             "schema_version": 1,
-            "input_root": str(input_root),
+            "task_id": task_id,
+            "input_root": str(input_root) if input_root else None,
+            "recordings_manifest": (
+                str(recordings_manifest) if recordings_manifest else None
+            ),
             "thresholds": {
                 "hand_training_step_warning_m": hand_step_warning_m,
                 "head_training_step_warning_m": head_step_warning_m,
@@ -715,7 +818,9 @@ def visualize_trajectory_batch(
             "takes": records,
         }
         write_json_atomic(temporary / "report.json", report)
-        (temporary / "index.html").write_text(_html(records), encoding="utf-8")
+        (temporary / "index.html").write_text(
+            _html(records, task_id), encoding="utf-8"
+        )
         _write_summary_csv(temporary / "summary.csv", records)
         if write_png:
             plots = temporary / "plots"
@@ -728,7 +833,7 @@ def visualize_trajectory_batch(
                     hand_step_warning_m=hand_step_warning_m,
                     head_step_warning_m=head_step_warning_m,
                 )
-            _write_overview(temporary / "overview.png", records, plots)
+            _write_overview(temporary / "overview.png", records, plots, task_id)
         temporary.rename(output)
     except Exception:
         shutil.rmtree(temporary, ignore_errors=True)

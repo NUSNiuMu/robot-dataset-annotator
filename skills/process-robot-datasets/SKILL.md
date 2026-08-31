@@ -169,6 +169,10 @@ readable QC report from the reviewed recording root:
     rda visualize-trajectories --input-root <recordings-root> \
       --output <trajectory-qc-dir> --write-png
 
+For a multi-recording export, prefer `--recordings-manifest <path>` instead of `--input-root`.
+This loads the exact review manifest, decisions, and episode pose audit selected for that dataset,
+including corrected manifests from an expansion review, without rediscovering stale review files.
+
 Select the corrected manifest referenced by a final PASS audit; do not select files by a filename
 guess when earlier `NEEDS_REVIEW` or pre-settling artifacts coexist. When `qr_transform.json` is
 available, visualize both raw and corrected trajectories in the QR frame so recordings share a

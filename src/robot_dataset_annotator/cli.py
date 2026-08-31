@@ -274,6 +274,7 @@ def _visualize_trajectories(args: argparse.Namespace) -> int:
 
     result = visualize_trajectory_batch(
         input_root=args.input_root,
+        recordings_manifest=args.recordings_manifest,
         output=args.output,
         write_png=args.write_png,
         maximum_points=args.maximum_points,
@@ -552,7 +553,15 @@ def build_parser() -> argparse.ArgumentParser:
         "visualize-trajectories",
         help="visualize raw and corrected 3D pose trajectories for a batch",
     )
-    visualize_trajectories.add_argument("--input-root", type=Path, required=True)
+    trajectory_source = visualize_trajectories.add_mutually_exclusive_group(
+        required=True
+    )
+    trajectory_source.add_argument("--input-root", type=Path)
+    trajectory_source.add_argument(
+        "--recordings-manifest",
+        type=Path,
+        help="load the exact review artifacts referenced by a batch manifest",
+    )
     visualize_trajectories.add_argument("--output", type=Path, required=True)
     visualize_trajectories.add_argument(
         "--write-png",

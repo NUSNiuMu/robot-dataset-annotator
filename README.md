@@ -143,6 +143,15 @@ pose 流中存在已确认的大幅坐标跳变，其前后独立出现的中等
   --write-png
 ```
 
+多录制数据集复检时应直接传入导出所用的精确 manifest，避免网页重新发现旧版 decisions：
+
+```bash
+.venv/bin/rda visualize-trajectories \
+  --recordings-manifest outputs/batch/recordings_manifest.json \
+  --output outputs/batch/trajectory-qc \
+  --write-png
+```
+
 输出包括可拖动旋转和缩放的 `index.html`、详细 `report.json`、表格 `summary.csv`，以及可选
 的逐 take PNG 和总览图。HTML 和逐 take PNG 只绘制最终 decisions 选择的 context/训练区间，
 被截断的漂移区间不会混入轨迹；raw 为低透明虚线、corrected 为实线，黄色点表示所选区间内
